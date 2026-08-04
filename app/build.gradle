@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace 'moe.umbrella.marimo'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         applicationId "moe.umbrella.marimo"
@@ -37,4 +37,8 @@ android {
 dependencies {
     implementation 'androidx.core:core:1.13.1'
     implementation 'androidx.documentfile:documentfile:1.0.1'
+    implementation 'androidx.media3:media3-exoplayer:1.10.1'
+    implementation 'androidx.media3:media3-session:1.10.1'
+    implementation 'androidx.media3:media3-ui:1.10.1'
+    implementation 'androidx.media:media:1.7.0'
 }

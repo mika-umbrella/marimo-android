@@ -1,60 +1,57 @@
 package moe.umbrella.marimo;
 
-import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.app.PendingIntent;
-import android.app.Service;
-import android.content.Context;
 import android.content.Intent;
-import android.media.AudioAttributes;
-import android.media.MediaMetadata;
-import android.media.MediaPlayer;
-import android.media.session.MediaSession;
-import android.media.session.PlaybackState;
 import android.net.Uri;
 import android.os.IBinder;
 
-import java.io.IOException;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.Player;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.session.MediaSession;
+import androidx.media3.session.MediaSessionService;
+
 import java.util.ArrayList;
 import java.util.List;
 
-/** MediaPlayer-backed playback + MediaSession + queue + seek + position. */
-public class PlaybackService extends Service implements MediaPlayer.OnCompletionListener {
+/** ExoPlayer-backed playback + MediaSessionService.
+ *  ExoPlayer gives TRUE gapless between queued tracks (same-format) and
+ *  MediaSessionService posts the notification widget + lockscreen
+ *  controls automatically. Shuffle/repeat come from the player. */
+public class PlaybackService extends MediaSessionService {
 
     public static final String ACTION_PLAY = "moe.umbrella.marimo.PLAY";
     public static final String ACTION_PAUSE = "moe.umbrella.marimo.PAUSE";
     public static final String ACTION_NEXT = "moe.umbrella.marimo.NEXT";
     public static final String ACTION_PREV = "moe.umbrella.marimo.PREV";
+    public static final String ACTION_SHUFFLE = "moe.umbrella.marimo.SHUFFLE";
+    public static final String ACTION_REPEAT = "moe.umbrella.marimo.REPEAT";
     public static final String EXTRA_POS = "pos";
 
-    private static final String CHANNEL_ID = "marimo_playback";
-
-    private MediaPlayer mp;
-    private MediaSession session;
     private static volatile List<Track> tracks = new ArrayList<>();
     private static volatile boolean playing;
     private static volatile long positionMs, durationMs;
+    private static volatile int shuffle = 0, repeat = 0;   /* 0 off,1 on / 0 off,1 all,2 one */
     private static volatile PlaybackService instance;
-    private int cur = -1;
+
+    private ExoPlayer player;
+    private MediaSession session;
     private Thread ticker;
-    private final java.util.concurrent.ExecutorService bg =
-            java.util.concurrent.Executors.newSingleThreadExecutor();
 
-    public static void setTracksStatic(List<Track> list) { tracks = list; }
+    public static void setTracksStatic(List<Track> list) {
+        synchronized (tracks) {
+            tracks = new ArrayList<>(list);
+        }
+    }
 
-    /** peek the current queue (for the queue dialog) */
     public static List<Track> peekQueue() {
         synchronized (tracks) { return new ArrayList<>(tracks); }
     }
 
-    /** seek the live player (called from the seekbar) */
     public static void seek(int ms) {
         PlaybackService s = instance;
-        if (s != null && s.mp != null) s.mp.seekTo(ms);
+        if (s != null && s.player != null) s.player.seekTo(ms);
     }
 
-    /** append to the play queue; returns the index of the first added */
     public static int addToQueueStatic(List<Track> add) {
         synchronized (tracks) {
             int first = tracks.size();
@@ -63,62 +60,65 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
         }
     }
 
-    public static void seekTo(int ms) { /* handled via service instance */ }
-
     public static boolean isPlaying() { return playing; }
     public static long position() { return positionMs; }
     public static long duration() { return durationMs; }
+    public static int shuffle() { return shuffle; }
+    public static int repeat() { return repeat; }
+    public static int currentIndex() {
+        PlaybackService s = instance;
+        return s != null && s.player != null ? s.player.getCurrentMediaItemIndex() : -1;
+    }
 
     @Override
     public void onCreate() {
         super.onCreate();
         instance = this;
-        mp = new MediaPlayer();
-        mp.setAudioAttributes(new AudioAttributes.Builder()
-                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .build());
-        mp.setOnCompletionListener(this);
-        /* prepareAsync: prepare() on the main thread ANRs when the audio
-         * stack is slow/wedged (seen on waydroid after audioserver reset) */
-        mp.setOnPreparedListener(p -> {
-            p.start();
-            playing = true;
-            durationMs = p.getDuration();
-            if (cur >= 0 && cur < tracks.size())
-                publish(tracks.get(cur));
-            startForeground(1, buildNotification(
-                    cur >= 0 && cur < tracks.size() ? tracks.get(cur)
-                            : new Track("", ""), true));
+        player = new ExoPlayer.Builder(this).build();
+        player.setRepeatMode(repeat == 2 ? Player.REPEAT_MODE_ONE
+                : repeat == 1 ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
+        player.setShuffleModeEnabled(shuffle == 1);
+        player.addListener(new Player.Listener() {
+            @Override public void onIsPlayingChanged(boolean b) { playing = b; }
         });
-        mp.setOnErrorListener((p, what, extra) -> {
-            playing = false;
-            stopSelf();
-            return true;
-        });
+        session = new MediaSession.Builder(this, player)
+                .setSessionActivity(android.app.PendingIntent.getActivity(this, 0,
+                        new Intent(this, MainActivity.class),
+                        android.app.PendingIntent.FLAG_IMMUTABLE))
+                .build();
+        /* media3's manager only posts when started by a media command;
+         * our direct-start path posts its own MediaStyle widget instead.
+         * no-op provider so media3 never posts a duplicate. */
+        setMediaNotificationProvider(new androidx.media3.session.MediaNotification.Provider() {
+            @Override
+            public androidx.media3.session.MediaNotification createNotification(
+                    androidx.media3.session.MediaSession s,
+                    com.google.common.collect.ImmutableList<
+                            androidx.media3.session.CommandButton> cmds,
+                    androidx.media3.session.MediaNotification.ActionFactory af,
+                    androidx.media3.session.MediaNotification.Provider.Callback cb) {
+                return null;   /* we post our own MediaStyle widget */
+            }
 
-        NotificationChannel ch = new NotificationChannel(
-                CHANNEL_ID, "marimo playback",
-                NotificationManager.IMPORTANCE_LOW);
-        getSystemService(NotificationManager.class).createNotificationChannel(ch);
+            @Override
+            public boolean handleCustomCommand(
+                    androidx.media3.session.MediaSession s, String action,
+                    android.os.Bundle extras) {
+                return false;
+            }
 
-        session = new MediaSession(this, "marimo");
-        session.setCallback(new MediaSession.Callback() {
-            @Override public void onPlay() { play(true); }
-            @Override public void onPause() { pause(); }
-            @Override public void onSkipToNext() { next(); }
-            @Override public void onSkipToPrevious() { prev(); }
-            @Override public void onSeekTo(long pos) { if (mp != null) mp.seekTo((int) pos); }
-            @Override public void onStop() { stopSelf(); }
+            @Override
+            public NotificationChannelInfo getNotificationChannelInfo() {
+                return null;
+            }
         });
-        session.setActive(true);
 
         ticker = new Thread(() -> {
             while (!Thread.currentThread().isInterrupted()) {
                 try {
-                    if (playing && mp != null) {
-                        positionMs = mp.getCurrentPosition();
-                        durationMs = mp.getDuration();
+                    if (player != null) {
+                        positionMs = player.getCurrentPosition();
+                        durationMs = player.getDuration();
                     }
                     Thread.sleep(200);
                 } catch (InterruptedException e) {
@@ -131,133 +131,116 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
     }
 
     @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null) {
-            String a = intent.getAction();
-            int pos = intent.getIntExtra(EXTRA_POS, -1);
-            if (pos >= 0) {
-                cur = pos;
-                play(true);           /* explicit track: switch, never pause */
-            } else if (ACTION_PLAY.equals(a)) {
-                toggle();
-            } else if (ACTION_PAUSE.equals(a)) {
-                pause();
-            } else if (ACTION_NEXT.equals(a)) {
-                next();
-            } else if (ACTION_PREV.equals(a)) {
-                prev();
-            }
-        }
-        return START_NOT_STICKY;
-    }
-
-    private void toggle() {
-        if (mp.isPlaying()) pause();
-        else play(false);
-    }
-
-    private void play(boolean force) {
-        if (cur < 0 || cur >= tracks.size()) return;
-        if (!force && mp.isPlaying()) { pause(); return; }
-        final Track t = tracks.get(cur);
-        bg.execute(() -> {              /* never block the main thread */
-            try {
-                mp.reset();
-                mp.setDataSource(this, Uri.parse(t.token));
-                mp.prepareAsync();
-            } catch (Exception e) {
-                stopSelf();
-            }
-        });
-    }
-
-    public void doSeek(int ms) {
-        if (mp != null && mp.isPlaying()) mp.seekTo(ms);
-    }
-
-    private void pause() {
-        if (mp.isPlaying()) {
-            mp.pause();
-            playing = false;
-            positionMs = mp.getCurrentPosition();
-            updateNotification();
-        }
-    }
-
-    private void next() {
-        if (cur < tracks.size() - 1) { cur++; play(true); }
-        else if (cur == tracks.size() - 1) { cur = 0; play(true); }
-    }
-
-    private void prev() {
-        if (cur > 0) { cur--; play(true); }
+    public MediaSession onGetSession(MediaSession.ControllerInfo controllerInfo) {
+        return session;
     }
 
     @Override
-    public void onCompletion(MediaPlayer p) { next(); }
-
-    private void publish(Track t) {
-        MediaMetadata md = new MediaMetadata.Builder()
-                .putString(MediaMetadata.METADATA_KEY_TITLE, t.title.isEmpty() ? t.name : t.title)
-                .putString(MediaMetadata.METADATA_KEY_ARTIST, t.artist)
-                .putString(MediaMetadata.METADATA_KEY_ALBUM, t.album)
-                .build();
-        session.setMetadata(md);
-        session.setPlaybackState(new PlaybackState.Builder()
-                .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE
-                        | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS
-                        | PlaybackState.ACTION_SEEK_TO)
-                .setState(PlaybackState.STATE_PLAYING, mp.getCurrentPosition(), 1f)
-                .build());
-    }
-
-    private Notification buildNotification(Track t, boolean isPlaying) {
-        Intent open = new Intent(this, MainActivity.class);
-        PendingIntent pi = PendingIntent.getActivity(this, 0, open,
-                PendingIntent.FLAG_IMMUTABLE);
-        Intent playPause = new Intent(this, PlaybackService.class)
-                .setAction(isPlaying ? ACTION_PAUSE : ACTION_PLAY);
-        PendingIntent pp = PendingIntent.getService(this, 1, playPause,
-                PendingIntent.FLAG_IMMUTABLE);
-        Notification.Builder b = new Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle(t.title.isEmpty() ? t.name : t.title)
-                .setContentText(t.artist)
-                .setSmallIcon(android.R.drawable.ic_media_play)
-                .setContentIntent(pi)
-                .setOngoing(true);
-        if (android.os.Build.VERSION.SDK_INT >= 24) {
-            b.addAction(new Notification.Action.Builder(
-                    android.R.drawable.ic_media_previous, "prev",
-                    PendingIntent.getService(this, 2,
-                            new Intent(this, PlaybackService.class).setAction(ACTION_PREV),
-                            PendingIntent.FLAG_IMMUTABLE)).build());
-            b.addAction(new Notification.Action.Builder(
-                    isPlaying ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play,
-                    isPlaying ? "pause" : "play", pp).build());
-            b.addAction(new Notification.Action.Builder(
-                    android.R.drawable.ic_media_next, "next",
-                    PendingIntent.getService(this, 3,
-                            new Intent(this, PlaybackService.class).setAction(ACTION_NEXT),
-                            PendingIntent.FLAG_IMMUTABLE)).build());
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        int rc = super.onStartCommand(intent, flags, startId);  /* media3 machinery */
+        if (intent == null) return rc;
+        String a = intent.getAction();
+        int pos = intent.getIntExtra(EXTRA_POS, -1);
+        if (pos >= 0) {
+            queueTracks();
+            player.seekTo(pos, 0);
+            player.prepare();
+            player.play();
+            postWidget();
+        } else if (ACTION_PLAY.equals(a)) {
+            if (player.isPlaying()) player.pause();
+            else { player.play(); postWidget(); }
+        } else if (ACTION_PAUSE.equals(a)) {
+            player.pause();
+        } else if (ACTION_NEXT.equals(a)) {
+            player.seekToNextMediaItem();
+        } else if (ACTION_PREV.equals(a)) {
+            player.seekToPreviousMediaItem();
+        } else if (ACTION_SHUFFLE.equals(a)) {
+            shuffle = shuffle == 1 ? 0 : 1;
+            player.setShuffleModeEnabled(shuffle == 1);
+        } else if (ACTION_REPEAT.equals(a)) {
+            repeat = (repeat + 1) % 3;
+            player.setRepeatMode(repeat == 2 ? Player.REPEAT_MODE_ONE
+                    : repeat == 1 ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
         }
-        return b.build();
+        return rc;
     }
 
-    private void updateNotification() {
-        if (cur >= 0 && cur < tracks.size())
-            getSystemService(NotificationManager.class)
-                    .notify(1, buildNotification(tracks.get(cur), mp.isPlaying()));
+    /** MediaStyle notification wired to our MediaSession token: the
+     *  pulldown widget with prev/play/next that controls the player. */
+    private void postWidget() {
+        Track t = player.getCurrentMediaItem() != null
+                ? (Track) player.getCurrentMediaItem().localConfiguration.tag
+                : null;
+        if (t == null) return;
+        Intent open = new Intent(this, MainActivity.class);
+        android.app.PendingIntent pi = android.app.PendingIntent.getActivity(
+                this, 0, open, android.app.PendingIntent.FLAG_IMMUTABLE);
+        androidx.core.app.NotificationCompat.Builder b =
+                new androidx.core.app.NotificationCompat.Builder(this, "marimo_playback")
+                        .setContentTitle(t.title.isEmpty() ? t.name : t.title)
+                        .setContentText(t.artist)
+                        .setSmallIcon(android.R.drawable.ic_media_play)
+                        .setContentIntent(pi)
+                        .setOngoing(true)
+                        .setVisibility(androidx.core.app.NotificationCompat
+                                .VISIBILITY_PUBLIC)
+                        .setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
+                                .setMediaSession(android.support.v4.media.session.MediaSessionCompat.Token.fromToken(session.getPlatformToken()))
+                                .setShowActionsInCompactView(0, 1, 2))
+                        .addAction(new androidx.core.app.NotificationCompat.Action(
+                                android.R.drawable.ic_media_previous, "prev",
+                                ctl(PlaybackService.ACTION_PREV)))
+                        .addAction(new androidx.core.app.NotificationCompat.Action(
+                                player.isPlaying() ? android.R.drawable.ic_media_pause
+                                        : android.R.drawable.ic_media_play,
+                                player.isPlaying() ? "pause" : "play",
+                                ctl(PlaybackService.ACTION_PLAY)))
+                        .addAction(new androidx.core.app.NotificationCompat.Action(
+                                android.R.drawable.ic_media_next, "next",
+                                ctl(PlaybackService.ACTION_NEXT)));
+        startForeground(1, b.build());
+        android.app.NotificationManager nm =
+                getSystemService(android.app.NotificationManager.class);
+        nm.notify(1, b.build());
+    }
+
+    private android.app.PendingIntent ctl(String action) {
+        return android.app.PendingIntent.getService(this, action.hashCode(),
+                new Intent(this, PlaybackService.class).setAction(action),
+                android.app.PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private void queueTracks() {
+        List<Track> list;
+        synchronized (tracks) { list = new ArrayList<>(tracks); }
+        List<MediaItem> items = new ArrayList<>();
+        for (Track t : list) {
+            MediaItem mi = new MediaItem.Builder()
+                    .setUri(Uri.parse(t.token))
+                    .setMediaId(t.token)
+                    .setTag(t)
+                    .setMediaMetadata(new androidx.media3.common.MediaMetadata.Builder()
+                            .setTitle(t.title.isEmpty() ? t.name : t.title)
+                            .setArtist(t.artist)
+                            .setAlbumTitle(t.album)
+                            .build())
+                    .build();
+            items.add(mi);
+        }
+        player.setMediaItems(items, 0, 0);
     }
 
     @Override
     public void onDestroy() {
         playing = false;
         if (ticker != null) ticker.interrupt();
-        mp.release();
-        session.release();
+        if (session != null) session.release();
+        if (player != null) player.release();
         super.onDestroy();
     }
 
     @Override
-    public IBinder onBind(Intent intent) { return null; }
+    public IBinder onBind(Intent intent) { return super.onBind(intent); }
 }

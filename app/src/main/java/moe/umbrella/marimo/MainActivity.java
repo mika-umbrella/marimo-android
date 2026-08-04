@@ -105,6 +105,22 @@ public class MainActivity extends Activity {
         pPlay = findViewById(R.id.p_play);
         pQueueToggle = findViewById(R.id.p_queue_toggle);
         pQueue = findViewById(R.id.p_queue);
+        ImageButton pShuffle = findViewById(R.id.p_shuffle);
+        ImageButton pRepeat = findViewById(R.id.p_repeat);
+        pShuffle.setOnClickListener(v -> {
+            startService(new Intent(this, PlaybackService.class)
+                    .setAction(PlaybackService.ACTION_SHUFFLE));
+            updatePlayerUi();
+        });
+        pRepeat.setOnClickListener(v -> {
+            startService(new Intent(this, PlaybackService.class)
+                    .setAction(PlaybackService.ACTION_REPEAT));
+            updatePlayerUi();
+        });
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            requestPermissions(new String[]{
+                    android.Manifest.permission.POST_NOTIFICATIONS}, 1);
+        }
         pQueueToggle.setOnClickListener(v -> {
             queueVisible = !queueVisible;
             pQueue.setVisibility(queueVisible ? View.VISIBLE : View.GONE);
@@ -467,11 +483,13 @@ public class MainActivity extends Activity {
 
     private void refreshQueueList() {
         List<Track> q = PlaybackService.peekQueue();
+        int cur = PlaybackService.currentIndex();
         String[] lines = new String[q.size()];
         for (int i = 0; i < q.size(); i++) {
             Track t = q.get(i);
             String title = t.title.isEmpty() ? t.name : t.title;
-            lines[i] = (i + 1) + ".  " + title
+            String num = String.format("%02d", i + 1);
+            lines[i] = (i == cur ? "▶ " : "") + num + ".  " + title
                     + (t.artist.isEmpty() ? "" : "  —  " + t.artist);
         }
         pQueue.setAdapter(new ArrayAdapter<>(this,
@@ -489,6 +507,10 @@ public class MainActivity extends Activity {
         pPlay.setImageResource(playing
                 ? android.R.drawable.ic_media_pause
                 : android.R.drawable.ic_media_play);
+        ImageButton sh = findViewById(R.id.p_shuffle);
+        ImageButton rp = findViewById(R.id.p_repeat);
+        if (sh != null) sh.setAlpha(PlaybackService.shuffle() == 1 ? 1f : 0.3f);
+        if (rp != null) rp.setAlpha(PlaybackService.repeat() > 0 ? 1f : 0.3f);
         long pos = PlaybackService.position();
         long dur = PlaybackService.duration();
         if (dur > 0) {

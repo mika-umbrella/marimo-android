@@ -93,6 +93,8 @@ public class WaveformSeekBar extends View {
                 invalidate();
                 return true;
             case MotionEvent.ACTION_UP:
+                android.util.Log.i("marimo", "seekbar UP drag=" + dragProgress
+                        + " max=" + max);
                 if (tracking && listener != null) listener.onSeek(dragProgress);
                 tracking = false;
                 dragProgress = -1;

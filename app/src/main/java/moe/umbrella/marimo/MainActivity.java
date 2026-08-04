@@ -493,17 +493,7 @@ public class MainActivity extends Activity {
 
     private void refreshQueueList() {
         List<Track> q = PlaybackService.peekQueue();
-        int cur = PlaybackService.currentIndex();
-        String[] lines = new String[q.size()];
-        for (int i = 0; i < q.size(); i++) {
-            Track t = q.get(i);
-            String title = t.title.isEmpty() ? t.name : t.title;
-            String num = String.format("%02d", i + 1);
-            lines[i] = (i == cur ? "▶ " : "") + num + ".  " + title
-                    + (t.artist.isEmpty() ? "" : "  —  " + t.artist);
-        }
-        qList.setAdapter(new ArrayAdapter<>(this,
-                android.R.layout.simple_list_item_1, lines));
+        qList.setAdapter(new QueueAdapter(this, q));
     }
 
     private long hash(String s) {

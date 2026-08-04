@@ -48,9 +48,84 @@ public class PlaybackService extends MediaSessionService {
         synchronized (tracks) { return new ArrayList<>(tracks); }
     }
 
+    /** prepare needed only from IDLE/ENDED — BUFFERING is already on its
+     *  way to READY and re-preparing double-starts the source */
+    private boolean needPrepare() {
+        int st = player.getPlaybackState();
+        return st == Player.STATE_IDLE || st == Player.STATE_ENDED;
+    }
+
+    /** replay from an exhausted source: waydroid's flac decoder cannot
+     *  re-init the same instance (repeat-one hangs too) — rebuild the
+     *  whole player fresh so the decoder starts clean */
+    public static void replayFrom(int ms) {
+        PlaybackService s = instance;
+        if (s == null) return;
+        s.rebuildPlayer(ms);
+    }
+
+    private ExoPlayer makePlayer() {
+        ExoPlayer p = new ExoPlayer.Builder(this).build();
+        p.setRepeatMode(repeat == 2 ? Player.REPEAT_MODE_ONE
+                : repeat == 1 ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
+        p.setShuffleModeEnabled(shuffle == 1);
+        p.addListener(new Player.Listener() {
+            @Override public void onIsPlayingChanged(boolean b) { playing = b; }
+            @Override public void onPlaybackStateChanged(int state) {
+                android.util.Log.i("marimo", "playerState -> " + state);
+            }
+            @Override public void onPlayerError(androidx.media3.common.PlaybackException e) {
+                android.util.Log.e("marimo", "playerError " + e.errorCode
+                        + " " + e.getMessage());
+            }
+        });
+        return p;
+    }
+
+    private void rebuildPlayer(final int seekMs) {
+        android.util.Log.i("marimo", "rebuildPlayer seek=" + seekMs
+                + " oldState=" + player.getPlaybackState());
+        final int idx = Math.max(player.getCurrentMediaItemIndex(), 0);
+        final List<Track> list;
+        synchronized (tracks) { list = new ArrayList<>(tracks); }
+        final ExoPlayer oldPlayer = player;
+        /* brand-new player (fresh decoder) but the SAME session — media3
+         * lets us swap players underneath so the platform connection
+         * (and the notification widget) survives */
+        player = makePlayer();
+        session.setPlayer(player);
+        List<MediaItem> items = new ArrayList<>();
+        for (Track t : list) {
+            items.add(new MediaItem.Builder()
+                    .setUri(Uri.parse(t.token))
+                    .setMediaId(t.token)
+                    .setTag(t)
+                    .setMediaMetadata(new androidx.media3.common.MediaMetadata.Builder()
+                            .setTitle(t.title.isEmpty() ? t.name : t.title)
+                            .setArtist(t.artist)
+                            .setAlbumTitle(t.album)
+                            .build())
+                    .build());
+        }
+        player.setMediaItems(items,
+                Math.min(idx, Math.max(0, items.size() - 1)), 0);
+        player.prepare();
+        player.seekTo(seekMs);
+        player.play();
+        if (oldPlayer != null) oldPlayer.release();
+        postWidget();
+    }
+
     public static void seek(int ms) {
         PlaybackService s = instance;
-        if (s != null && s.player != null) s.player.seekTo(ms);
+        if (s == null || s.player == null) return;
+        android.util.Log.i("marimo", "seek(" + ms + ") state="
+                + s.player.getPlaybackState());
+        if (s.needPrepare()) {
+            s.rebuildPlayer(ms);
+        } else {
+            s.player.seekTo(ms);
+        }
     }
 
     public static int addToQueueStatic(List<Track> add) {
@@ -75,13 +150,7 @@ public class PlaybackService extends MediaSessionService {
     public void onCreate() {
         super.onCreate();
         instance = this;
-        player = new ExoPlayer.Builder(this).build();
-        player.setRepeatMode(repeat == 2 ? Player.REPEAT_MODE_ONE
-                : repeat == 1 ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
-        player.setShuffleModeEnabled(shuffle == 1);
-        player.addListener(new Player.Listener() {
-            @Override public void onIsPlayingChanged(boolean b) { playing = b; }
-        });
+        player = makePlayer();
         session = new MediaSession.Builder(this, player)
                 .setSessionActivity(android.app.PendingIntent.getActivity(this, 0,
                         new Intent(this, MainActivity.class),
@@ -163,7 +232,16 @@ public class PlaybackService extends MediaSessionService {
             postWidget();
         } else if (ACTION_PLAY.equals(a)) {
             if (player.isPlaying()) player.pause();
-            else { player.play(); postWidget(); }
+            else {
+                if (needPrepare()) {
+                    /* waydroid's decoder can't re-init an exhausted source
+                     * — a fresh player starts clean (same track) */
+                    rebuildPlayer(0);
+                } else {
+                    player.play();
+                    postWidget();
+                }
+            }
         } else if (ACTION_PAUSE.equals(a)) {
             player.pause();
         } else if (ACTION_NEXT.equals(a)) {
@@ -227,6 +305,10 @@ public class PlaybackService extends MediaSessionService {
     }
 
     private void queueTracks() {
+        queueTracksAt(0);
+    }
+
+    private void queueTracksAt(int index) {
         List<Track> list;
         synchronized (tracks) { list = new ArrayList<>(tracks); }
         List<MediaItem> items = new ArrayList<>();
@@ -243,7 +325,9 @@ public class PlaybackService extends MediaSessionService {
                     .build();
             items.add(mi);
         }
-        player.setMediaItems(items, 0, 0);
+        if (index < 0) index = 0;
+        if (index >= items.size()) index = Math.max(0, items.size() - 1);
+        player.setMediaItems(items, index, 0);
     }
 
     @Override

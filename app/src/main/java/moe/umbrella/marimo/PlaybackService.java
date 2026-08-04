@@ -82,6 +82,7 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
 
     private void play() {
         if (cur < 0 || cur >= tracks.size()) return;
+        if (mp.isPlaying()) { pause(); return; }   /* UI button toggles */
         Track t = tracks.get(cur);
         try {
             mp.reset();

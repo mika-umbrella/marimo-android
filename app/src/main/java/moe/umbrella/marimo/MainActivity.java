@@ -186,6 +186,7 @@ public class MainActivity extends Activity {
             showTab(2);
             refreshQueueList();
         });
+        findViewById(R.id.tab_player).setOnClickListener(v -> showTab(1));
 
         android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         Scrobbler.configure(prefs.getString("lf_key", ""),
@@ -205,6 +206,8 @@ public class MainActivity extends Activity {
         }
 
         rescan();
+        PlaybackService.attachQueueStorage(
+                new File(getFilesDir(), "queue.dat"));
         handler.post(uiTick);
     }
 

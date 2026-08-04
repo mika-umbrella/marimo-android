@@ -42,7 +42,89 @@ public class PlaybackService extends MediaSessionService {
         synchronized (tracks) {
             tracks = new ArrayList<>(list);
         }
+        saveQueue(null);
     }
+
+    /** queue memory: persists token list + current index to app files */
+    private static volatile java.io.File queueFile;
+    private static int savedCur = -1;
+
+    public static void attachQueueStorage(java.io.File file) {
+        queueFile = file;
+        loadQueue();
+    }
+
+    private static void loadQueue() {
+        if (queueFile == null || !queueFile.exists()) return;
+        try {
+            java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(
+                            new java.io.FileInputStream(queueFile),
+                            java.nio.charset.StandardCharsets.UTF_8));
+            String line;
+            int cur = -1;
+            List<String> toks = new ArrayList<>();
+            List<String> names = new ArrayList<>();
+            List<String> titles = new ArrayList<>();
+            List<String> artists = new ArrayList<>();
+            List<Integer> durs = new ArrayList<>();
+            while ((line = r.readLine()) != null) {
+                if (line.startsWith("cur=")) {
+                    try { cur = Integer.parseInt(line.substring(4)); } catch (Exception e) { }
+                } else if (line.startsWith("t=")) toks.add(line.substring(2));
+                else if (line.startsWith("n=")) names.add(line.substring(2));
+                else if (line.startsWith("ti=")) titles.add(line.substring(3));
+                else if (line.startsWith("ar=")) artists.add(line.substring(3));
+                else if (line.startsWith("d=")) {
+                    try { durs.add(Integer.parseInt(line.substring(2))); } catch (Exception e) { durs.add(0); }
+                }
+            }
+            r.close();
+            synchronized (tracks) {
+                tracks = new ArrayList<>();
+                for (int i = 0; i < toks.size(); i++) {
+                    java.io.File f = new java.io.File(toks.get(i));
+                    if (!f.exists()) continue;             /* file gone (desktop rule) */
+                    Track t = new Track(toks.get(i),
+                            i < names.size() ? names.get(i) : toks.get(i));
+                    if (i < titles.size()) t.title = titles.get(i);
+                    if (i < artists.size()) t.artist = artists.get(i);
+                    if (i < durs.size()) t.durationMs = durs.get(i);
+                    tracks.add(t);
+                }
+            }
+            savedCur = cur;
+        } catch (Exception e) {
+            android.util.Log.e("marimo", "queue load: " + e);
+        }
+    }
+
+    public static void saveQueue(Integer curOverride) {
+        if (queueFile == null) return;
+        try {
+            synchronized (tracks) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("cur=").append(
+                        curOverride != null ? curOverride : savedCur).append('\n');
+                for (Track t : tracks) {
+                    sb.append("t=").append(t.token).append('\n');
+                    sb.append("n=").append(t.name).append('\n');
+                    if (!t.title.isEmpty()) sb.append("ti=").append(t.title).append('\n');
+                    if (!t.artist.isEmpty()) sb.append("ar=").append(t.artist).append('\n');
+                    if (t.durationMs > 0) sb.append("d=").append(t.durationMs).append('\n');
+                }
+                java.io.FileWriter w = new java.io.FileWriter(
+                        queueFile, java.nio.charset.StandardCharsets.UTF_8);
+                w.write(sb.toString());
+                w.close();
+            }
+        } catch (Exception e) {
+            android.util.Log.e("marimo", "queue save: " + e);
+        }
+    }
+
+    /** current index accessor used by the UI */
+    public static int restoredIndex() { return savedCur; }
 
     public static List<Track> peekQueue() {
         synchronized (tracks) { return new ArrayList<>(tracks); }

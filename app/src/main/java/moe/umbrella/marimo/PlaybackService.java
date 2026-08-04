@@ -38,6 +38,8 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
     private static volatile PlaybackService instance;
     private int cur = -1;
     private Thread ticker;
+    private final java.util.concurrent.ExecutorService bg =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
 
     public static void setTracksStatic(List<Track> list) { tracks = list; }
 
@@ -77,6 +79,23 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
                 .setUsage(AudioAttributes.USAGE_MEDIA)
                 .build());
         mp.setOnCompletionListener(this);
+        /* prepareAsync: prepare() on the main thread ANRs when the audio
+         * stack is slow/wedged (seen on waydroid after audioserver reset) */
+        mp.setOnPreparedListener(p -> {
+            p.start();
+            playing = true;
+            durationMs = p.getDuration();
+            if (cur >= 0 && cur < tracks.size())
+                publish(tracks.get(cur));
+            startForeground(1, buildNotification(
+                    cur >= 0 && cur < tracks.size() ? tracks.get(cur)
+                            : new Track("", ""), true));
+        });
+        mp.setOnErrorListener((p, what, extra) -> {
+            playing = false;
+            stopSelf();
+            return true;
+        });
 
         NotificationChannel ch = new NotificationChannel(
                 CHANNEL_ID, "marimo playback",
@@ -140,19 +159,16 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
     private void play(boolean force) {
         if (cur < 0 || cur >= tracks.size()) return;
         if (!force && mp.isPlaying()) { pause(); return; }
-        Track t = tracks.get(cur);
-        try {
-            mp.reset();
-            mp.setDataSource(this, Uri.parse(t.token));
-            mp.prepare();
-            mp.start();
-            playing = true;
-            durationMs = mp.getDuration();
-            publish(t);
-            startForeground(1, buildNotification(t, true));
-        } catch (IOException e) {
-            stopSelf();
-        }
+        final Track t = tracks.get(cur);
+        bg.execute(() -> {              /* never block the main thread */
+            try {
+                mp.reset();
+                mp.setDataSource(this, Uri.parse(t.token));
+                mp.prepareAsync();
+            } catch (Exception e) {
+                stopSelf();
+            }
+        });
     }
 
     public void doSeek(int ms) {

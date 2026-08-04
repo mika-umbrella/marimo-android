@@ -455,13 +455,12 @@ public class MainActivity extends Activity {
         pArtist.setText(t.artist);
         pAlbum.setText(t.album);
         pArt.setImageBitmap(t.art);
-        /* real waveform (async decode — never block the UI thread) */
-        pSeek.setWaveformSeed(hash(t.token));
+        /* real waveform (async decode — never block the UI thread).
+         * while it loads, the seekbar shows a flat silent baseline */
+        pSeek.resetWaveform();
         new Thread(() -> {
             int[] peaks = WaveformExtractor.get(this, t.token);
-            runOnUiThread(() -> {
-                if (peaks != null) pSeek.setWaveformPeaks(peaks);
-            });
+            runOnUiThread(() -> pSeek.setWaveformPeaks(peaks));
         }).start();
         refreshQueueList();
     }

@@ -19,11 +19,11 @@ public class WaveformSeekBar extends View {
     private final Paint played = new Paint();
     private final Paint rest = new Paint();
     private final Paint line = new Paint();
-    private long seed = 0;
     private int max = 1, progress = 0;
     private int[] heights;
     private boolean tracking;
     private Listener listener;
+    private boolean hasReal;
 
     public WaveformSeekBar(Context c, AttributeSet a) {
         super(c, a);
@@ -31,26 +31,24 @@ public class WaveformSeekBar extends View {
         rest.setColor(0xFF2A2A30);
         line.setColor(0xFF6B6B76);
         heights = new int[N_BARS];
+        for (int i = 0; i < N_BARS; i++) heights[i] = 4;   /* silent baseline */
     }
 
     public void setListener(Listener l) { listener = l; }
 
-    public void setWaveformSeed(long s) {
-        if (s == seed) return;
-        seed = s;
-        long x = s == 0 ? 0x9E3779B97F4A7C15L : s;
-        for (int i = 0; i < N_BARS; i++) {
-            x ^= x << 13; x ^= x >>> 7; x ^= x << 17;
-            heights[i] = (int) (x & 0x7FFFFFFFL) % 100;
-        }
+    /** use a real extracted waveform (peaks 0..100) */
+    public void setWaveformPeaks(int[] peaks) {
+        if (peaks == null) return;
+        hasReal = true;
+        for (int i = 0; i < N_BARS; i++)
+            heights[i] = peaks[Math.min(i, peaks.length - 1)];
         invalidate();
     }
 
-    /** use a real extracted waveform (peaks 0..100) instead of the PRNG */
-    public void setWaveformPeaks(int[] peaks) {
-        if (peaks == null) { setWaveformSeed(seed == 0 ? 1 : seed); return; }
-        for (int i = 0; i < N_BARS; i++)
-            heights[i] = peaks[Math.min(i, peaks.length - 1)];
+    /** back to the silent flat baseline */
+    public void resetWaveform() {
+        hasReal = false;
+        for (int i = 0; i < N_BARS; i++) heights[i] = 4;
         invalidate();
     }
 

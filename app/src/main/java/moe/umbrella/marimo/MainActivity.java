@@ -187,7 +187,13 @@ public class MainActivity extends Activity {
             refreshQueueList();
         });
 
-        String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_TREE, null);
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        Scrobbler.configure(prefs.getString("lf_key", ""),
+                prefs.getString("lf_secret", ""),
+                prefs.getString("lf_session", ""),
+                prefs.getString("lf_user", ""),
+                prefs.getString("lb_token", ""));
+        String saved = prefs.getString(KEY_TREE, null);
         if (saved != null) {
             try {
                 Uri u = Uri.parse(saved);
@@ -426,6 +432,7 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle("settings")
                 .setItems(new String[]{"pick music folder", "rescan",
+                                "scrobble (last.fm + listenbrainz)",
                                 "run core selftest"},
                         (d, which) -> {
                             if (which == 0) {
@@ -434,6 +441,8 @@ public class MainActivity extends Activity {
                                         REQ_PICK_TREE);
                             } else if (which == 1) {
                                 rescan();
+                            } else if (which == 2) {
+                                showScrobbleSettings();
                             } else {
                                 new Thread(() -> {
                                     String out = NativeBridge.runSelftest(
@@ -442,6 +451,43 @@ public class MainActivity extends Activity {
                                 }).start();
                             }
                         }).show();
+    }
+
+    private void showScrobbleSettings() {
+        final String[] cur = Scrobbler.current();
+        final android.widget.EditText lfKey = new android.widget.EditText(this);
+        lfKey.setHint("last.fm api key");
+        lfKey.setText(cur[0]);
+        final android.widget.EditText lfSession = new android.widget.EditText(this);
+        lfSession.setHint("last.fm session key");
+        lfSession.setText(cur[2]);
+        final android.widget.EditText lbToken = new android.widget.EditText(this);
+        lbToken.setHint("listenbrainz token");
+        lbToken.setText(cur[4]);
+        android.widget.LinearLayout lay = new android.widget.LinearLayout(this);
+        lay.setOrientation(android.widget.LinearLayout.VERTICAL);
+        lay.addView(lfKey);
+        lay.addView(lfSession);
+        lay.addView(lbToken);
+        new AlertDialog.Builder(this)
+                .setTitle("scrobble")
+                .setView(lay)
+                .setMessage("last.fm: api key + session key (last.fm/api/account)\n"
+                        + "listenbrainz: token (listenbrainz.org/profile)")
+                .setPositiveButton("save", (d, w) -> {
+                    Scrobbler.configure(lfKey.getText().toString(),
+                            cur[1], lfSession.getText().toString(), cur[3],
+                            lbToken.getText().toString());
+                    getSharedPreferences("marimo", MODE_PRIVATE).edit()
+                            .putString("lf_key", lfKey.getText().toString())
+                            .putString("lf_session", lfSession.getText().toString())
+                            .putString("lb_token", lbToken.getText().toString())
+                            .apply();
+                    toast(Scrobbler.hasLf() || Scrobbler.hasLb()
+                            ? "scrobble saved" : "no credentials — scrobbling off");
+                })
+                .setNegativeButton("cancel", null)
+                .show();
     }
 
     private void showQueue() {

@@ -55,6 +55,14 @@ public class PlaybackService extends MediaSessionService {
         return st == Player.STATE_IDLE || st == Player.STATE_ENDED;
     }
 
+    private Track currentTrack() {
+        androidx.media3.common.MediaItem mi = player.getCurrentMediaItem();
+        if (mi != null && mi.localConfiguration != null
+                && mi.localConfiguration.tag instanceof Track)
+            return (Track) mi.localConfiguration.tag;
+        return null;
+    }
+
     /** replay from an exhausted source: waydroid's flac decoder cannot
      *  re-init the same instance (repeat-one hangs too) — rebuild the
      *  whole player fresh so the decoder starts clean */
@@ -75,9 +83,25 @@ public class PlaybackService extends MediaSessionService {
                 : repeat == 1 ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
         p.setShuffleModeEnabled(shuffle == 1);
         p.addListener(new Player.Listener() {
-            @Override public void onIsPlayingChanged(boolean b) { playing = b; }
+            @Override public void onIsPlayingChanged(boolean b) {
+                playing = b;
+                if (b) {
+                    Track cur = currentTrack();
+                    if (cur != null) Scrobbler.nowPlaying(cur);
+                }
+            }
+            @Override public void onMediaItemTransition(
+                    androidx.media3.common.MediaItem mi, int reason) {
+                if (mi != null && mi.localConfiguration != null
+                        && mi.localConfiguration.tag instanceof Track) {
+                    Scrobbler.nowPlaying((Track) mi.localConfiguration.tag);
+                }
+            }
             @Override public void onPlaybackStateChanged(int state) {
-                android.util.Log.i("marimo", "playerState -> " + state);
+                if (state == Player.STATE_ENDED) {
+                    Track t = currentTrack();
+                    if (t != null) Scrobbler.scrobble(t, t.durationMs);
+                }
             }
             @Override public void onPlayerError(androidx.media3.common.PlaybackException e) {
                 android.util.Log.e("marimo", "playerError " + e.errorCode

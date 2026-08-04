@@ -99,6 +99,33 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- queue screen -->
+        <LinearLayout
+            android:id="@+id/screen_queue"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:padding="20dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="queue"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:textColor="#7dff7d" />
+
+            <ListView
+                android:id="@+id/q_list"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="12dp"
+                android:divider="#2a2a30"
+                android:dividerHeight="1dp" />
+        </LinearLayout>
+
         <!-- player screen -->
         <LinearLayout
             android:id="@+id/screen_player"
@@ -231,23 +258,6 @@
                     android:contentDescription="repeat" />
             </LinearLayout>
 
-            <Button
-                android:id="@+id/p_queue_toggle"
-                android:layout_width="match_parent"
-                android:layout_height="34dp"
-                android:layout_marginTop="4dp"
-                android:text="queue ▾"
-                android:textSize="13sp" />
-
-            <ListView
-                android:id="@+id/p_queue"
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1"
-                android:layout_marginTop="2dp"
-                android:visibility="gone"
-                android:divider="#2a2a30"
-                android:dividerHeight="1dp" />
         </LinearLayout>
     </FrameLayout>
 
@@ -275,6 +285,16 @@
             android:layout_weight="1"
             android:background="?android:attr/selectableItemBackground"
             android:text="library"
+            android:textColor="#e8ddd0"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/tab_queue"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackground"
+            android:text="queue"
             android:textColor="#e8ddd0"
             android:textSize="13sp" />
     </LinearLayout>

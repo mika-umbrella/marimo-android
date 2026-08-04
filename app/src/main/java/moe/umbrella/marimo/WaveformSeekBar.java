@@ -20,6 +20,7 @@ public class WaveformSeekBar extends View {
     private final Paint rest = new Paint();
     private final Paint line = new Paint();
     private int max = 1, progress = 0;
+    private int dragProgress = -1;
     private int[] heights;
     private boolean tracking;
     private Listener listener;
@@ -53,7 +54,10 @@ public class WaveformSeekBar extends View {
     }
 
     public void setMax(int m) { max = Math.max(m, 1); invalidate(); }
+    /** external updates (the 200ms ticker) — ignored while dragging so the
+     *  thumb doesn't snap back under the finger */
     public void setProgress(int p) {
+        if (tracking) return;
         if (p < 0) p = 0;
         if (p > max) p = max;
         if (p != progress) { progress = p; invalidate(); }
@@ -64,7 +68,7 @@ public class WaveformSeekBar extends View {
         super.onDraw(canvas);
         int w = getWidth(), h = getHeight();
         int barW = Math.max(w / N_BARS - 2, 1);
-        float frac = (float) progress / max;
+        float frac = (float) (tracking && dragProgress >= 0 ? dragProgress : progress) / max;
         int mid = h / 2;
         int playedX = (int) (w * frac);
         for (int i = 0; i < N_BARS; i++) {
@@ -83,11 +87,16 @@ public class WaveformSeekBar extends View {
             case MotionEvent.ACTION_DOWN:
             case MotionEvent.ACTION_MOVE:
                 tracking = true;
-                setProgress((int) (ev.getX() / getWidth() * max));
+                dragProgress = (int) (ev.getX() / getWidth() * max);
+                if (dragProgress < 0) dragProgress = 0;
+                if (dragProgress > max) dragProgress = max;
+                invalidate();
                 return true;
             case MotionEvent.ACTION_UP:
-                if (tracking && listener != null) listener.onSeek(progress);
+                if (tracking && listener != null) listener.onSeek(dragProgress);
                 tracking = false;
+                dragProgress = -1;
+                invalidate();
                 return true;
         }
         return false;

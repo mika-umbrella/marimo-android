@@ -40,14 +40,13 @@ public class MainActivity extends Activity {
     private final List<Album> albums = new ArrayList<>();
     private AlbumAdapter adapter;
     private TextView status, folderName;
-    private LinearLayout screenLibrary, screenPlayer;
+    private LinearLayout screenLibrary, screenPlayer, screenQueue;
     private TextView pTrack, pArtist, pAlbum, pTime;
     private ImageView pArt;
     private moe.umbrella.marimo.WaveformSeekBar pSeek;
     private ImageButton pPlay;
-    private Button pQueueToggle;
-    private ListView pQueue;
-    private boolean queueVisible;
+    private ListView qList;
+    private int tab = 0;   /* 0 library, 1 player, 2 queue */
     private Uri treeUri;
     private Album openAlbum;         // null = root (albums), else its tracks
     private final Handler handler = new Handler();
@@ -96,6 +95,7 @@ public class MainActivity extends Activity {
         folderName = findViewById(R.id.folder_name);
         screenLibrary = findViewById(R.id.screen_library);
         screenPlayer = findViewById(R.id.screen_player);
+        screenQueue = findViewById(R.id.screen_queue);
         pTrack = findViewById(R.id.p_track);
         pArtist = findViewById(R.id.p_artist);
         pAlbum = findViewById(R.id.p_album);
@@ -103,8 +103,6 @@ public class MainActivity extends Activity {
         pArt = findViewById(R.id.p_art);
         pSeek = findViewById(R.id.p_seek);
         pPlay = findViewById(R.id.p_play);
-        pQueueToggle = findViewById(R.id.p_queue_toggle);
-        pQueue = findViewById(R.id.p_queue);
         ImageButton pShuffle = findViewById(R.id.p_shuffle);
         ImageButton pRepeat = findViewById(R.id.p_repeat);
         pShuffle.setOnClickListener(v -> {
@@ -121,13 +119,8 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{
                     android.Manifest.permission.POST_NOTIFICATIONS}, 1);
         }
-        pQueueToggle.setOnClickListener(v -> {
-            queueVisible = !queueVisible;
-            pQueue.setVisibility(queueVisible ? View.VISIBLE : View.GONE);
-            pQueueToggle.setText(queueVisible ? "queue ▴" : "queue ▾");
-            if (queueVisible) refreshQueueList();
-        });
-        pQueue.setOnItemClickListener((p, v, pos, id) -> {
+        qList = findViewById(R.id.q_list);
+        qList.setOnItemClickListener((p, v, pos, id) -> {
             List<Track> q = PlaybackService.peekQueue();
             if (pos < 0 || pos >= q.size()) return;
             PlaybackService.setTracksStatic(q);
@@ -136,6 +129,16 @@ public class MainActivity extends Activity {
                     .putExtra(PlaybackService.EXTRA_POS, pos));
             showNowPlaying(q.get(pos));
         });
+
+        /* near-square screens (Titan 2 Elite 1080x1200) drop the big art
+         * and the A-Z strip so the list/player get real room */
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        float ratio = (float) Math.min(dm.widthPixels, dm.heightPixels)
+                / Math.max(dm.widthPixels, dm.heightPixels);
+        if (ratio > 0.86f) {
+            pArt.setVisibility(View.GONE);
+            findViewById(R.id.letterbar).setVisibility(View.GONE);
+        }
 
         adapter = new AlbumAdapter(this, entries);
         ListView list = findViewById(R.id.tracklist);
@@ -177,8 +180,12 @@ public class MainActivity extends Activity {
                         .setAction(PlaybackService.ACTION_NEXT)));
         pSeek.setListener(ms -> moe.umbrella.marimo.PlaybackService.seek(ms));
 
-        findViewById(R.id.tab_library).setOnClickListener(v -> showTab(false));
-        findViewById(R.id.tab_player).setOnClickListener(v -> showTab(true));
+        findViewById(R.id.tab_library).setOnClickListener(v -> showTab(0));
+        findViewById(R.id.tab_player).setOnClickListener(v -> showTab(1));
+        findViewById(R.id.tab_queue).setOnClickListener(v -> {
+            showTab(2);
+            refreshQueueList();
+        });
 
         String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_TREE, null);
         if (saved != null) {
@@ -195,9 +202,12 @@ public class MainActivity extends Activity {
         handler.post(uiTick);
     }
 
-    private void showTab(boolean player) {
-        screenLibrary.setVisibility(player ? View.GONE : View.VISIBLE);
-        screenPlayer.setVisibility(player ? View.VISIBLE : View.GONE);
+    private void showTab(int t) {
+        tab = t;
+        screenLibrary.setVisibility(t == 0 ? View.VISIBLE : View.GONE);
+        screenPlayer.setVisibility(t == 1 ? View.VISIBLE : View.GONE);
+        screenQueue.setVisibility(t == 2 ? View.VISIBLE : View.GONE);
+        if (t == 2) refreshQueueList();
     }
 
     /* ---------------- library / album grouping ---------------- */
@@ -368,7 +378,7 @@ public class MainActivity extends Activity {
                 .setAction(PlaybackService.ACTION_PLAY)
                 .putExtra(PlaybackService.EXTRA_POS, ctx.indexOf(t)));
         showNowPlaying(t);
-        showTab(true);
+        showTab(1);
     }
 
     private List<Track> tracksOf(Track t) {
@@ -388,7 +398,7 @@ public class MainActivity extends Activity {
                                 .setAction(PlaybackService.ACTION_PLAY)
                                 .putExtra(PlaybackService.EXTRA_POS, 0));
                         showNowPlaying(a.tracks.get(0));
-                        showTab(true);
+                        showTab(1);
                     } else if (which == 1) {
                         PlaybackService.addToQueueStatic(new ArrayList<>(a.tracks));
                         toast("queued " + a.tracks.size() + " tracks");
@@ -456,7 +466,7 @@ public class MainActivity extends Activity {
                             .setAction(PlaybackService.ACTION_PLAY)
                             .putExtra(PlaybackService.EXTRA_POS, which));
                     if (which < q.size()) showNowPlaying(q.get(which));
-                    showTab(true);
+                    showTab(1);
                 }).show();
     }
 
@@ -492,7 +502,7 @@ public class MainActivity extends Activity {
             lines[i] = (i == cur ? "▶ " : "") + num + ".  " + title
                     + (t.artist.isEmpty() ? "" : "  —  " + t.artist);
         }
-        pQueue.setAdapter(new ArrayAdapter<>(this,
+        qList.setAdapter(new ArrayAdapter<>(this,
                 android.R.layout.simple_list_item_1, lines));
     }
 

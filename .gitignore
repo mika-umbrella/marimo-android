@@ -1,5 +1,6 @@
 build/
 *.o
 *.a
+core/core_selftest
 .gradle/
 local.properties

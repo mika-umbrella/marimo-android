@@ -1,20 +1,24 @@
-# android/Makefile — NDK cross-build of the core selftest (M2 checkpoint).
-# Produces android-native binaries that run on waydroid / any device:
-#   adb push core_selftest_x86_64 /data/local/tmp/
-#   adb shell /data/local/tmp/core_selftest_x86_64
+# android/Makefile — build the C core + JNI shim into libmarimo_core.so
+# for both ABIs, dropped straight into the app's jniLibs so gradle just
+# packages them (no AGP/NDK plugin integration to fight with).
 NDK ?= $(HOME)/android-sdk/ndk/29.0.14206865
 TC  := $(NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin
 API := 24
-CFLAGS := -std=c11 -Wall -Wextra -pedantic -O2
-SRC := ../core/tags.c ../core/queue.c ../core/md5.c ../core/cJSON.c ../core/fs.c ../core/core_selftest.c
+CFLAGS := -std=c11 -Wall -Wextra -pedantic -O2 -fPIC
+CORE  := ../core/tags.c ../core/queue.c ../core/md5.c ../core/cJSON.c ../core/fs.c
+SHIM  := ../app/src/main/jni/marimo_core.c
+INC   := -I../core -I../app/src/main/jni
+OUT   := ../app/src/main/jniLibs
 
-all: core_selftest_x86_64 core_selftest_arm64
+all: $(OUT)/x86_64/libmarimo_core.so $(OUT)/arm64-v8a/libmarimo_core.so
 
-core_selftest_x86_64: $(SRC)
-	$(TC)/x86_64-linux-android$(API)-clang $(CFLAGS) -o $@ $(SRC)
+$(OUT)/x86_64/libmarimo_core.so: $(CORE) $(SHIM)
+	@mkdir -p $(dir $@)
+	$(TC)/x86_64-linux-android$(API)-clang $(CFLAGS) $(INC) -shared -o $@ $(CORE) $(SHIM)
 
-core_selftest_arm64: $(SRC)
-	$(TC)/aarch64-linux-android$(API)-clang $(CFLAGS) -o $@ $(SRC)
+$(OUT)/arm64-v8a/libmarimo_core.so: $(CORE) $(SHIM)
+	@mkdir -p $(dir $@)
+	$(TC)/aarch64-linux-android$(API)-clang $(CFLAGS) $(INC) -shared -o $@ $(CORE) $(SHIM)
 
 clean:
-	rm -f core_selftest_x86_64 core_selftest_arm64
+	rm -rf $(OUT)

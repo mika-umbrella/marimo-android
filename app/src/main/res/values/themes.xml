@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Marimo" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#151518</item>
+        <item name="android:colorBackground">#151518</item>
+        <item name="android:statusBarColor">#0d0d0f</item>
+        <item name="android:navigationBarColor">#0d0d0f</item>
+        <item name="android:textColor">#c9c9d1</item>
+    </style>
+</resources>

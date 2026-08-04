@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">marimo</string>
+    <string name="pick_folder">pick music folder</string>
+    <string name="scan">rescan</string>
+    <string name="run_selftest">run core selftest</string>
+    <string name="status_idle">scan app music dir or pick a folder</string>
+    <string name="now_playing">nothing playing</string>
+</resources>

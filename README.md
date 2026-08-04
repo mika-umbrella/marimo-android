@@ -17,12 +17,14 @@ published.** the port strategy: keep the C core, rebuild the UI layer.
       fd-based tag indexing, MediaSession callback, foreground service.
 - [x] **M1 — toolchain** — SDK + NDK r29 installed (~/android-sdk), licenses accepted
 - [x] **M2 — on-device core selftest** — NDK-built x86_64 binary ran on waydroid: md5/queue/fs/tags all green, japanese-named flac parsed via bionic (fd + path variants)
-- [ ] M3 — SAF tree walk → fd tag index → C queue (the skeleton above, made
-      real)
-- [ ] M4 — playback service: mpv-android (audio-only libmpv, `fd://` via
-      ParcelFileDescriptor) for true gapless, or MediaPlayer for simple needs
-- [ ] M5 — UI: touch-friendly list (no 18px hit targets, no alpha strip at
-      14px pitch — swipe scroll, bigger rows), mini player notification
+- [x] **M3 — app with JNI core** — gradle app (AGP 8.7.3, gradle 8.14.3, JDK 21
+      via temurin tarball): SAF tree walk → fd tags, app-private path tags
+      (tagReadPath), C queue exposed, on-screen JNI selftest
+- [x] **M4 — playback** — MediaPlayer service + MediaSession (lockscreen/BT
+      keys) + foreground notification. mpv-android stays the future upgrade
+      for true gapless
+- [~] **M5 — UI (partial)** — track list + controls + status line work;
+      the pixel marimo face (unifont UI) is the remaining dream
 - [ ] M6 — scrobbling: core/scrobble.c + libcurl for android, or the app does
       HTTP in kotlin
 

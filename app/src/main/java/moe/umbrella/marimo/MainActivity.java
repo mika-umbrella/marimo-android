@@ -136,19 +136,8 @@ public class MainActivity extends Activity {
             return true;
         });
 
-        findViewById(R.id.btn_pick).setOnClickListener(v -> {
-            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-            startActivityForResult(i, REQ_PICK_TREE);
-        });
-        findViewById(R.id.btn_scan).setOnClickListener(v -> rescan());
-        findViewById(R.id.btn_test).setOnClickListener(v ->
-                new Thread(() -> {
-                    String out = NativeBridge.runSelftest(
-                            new File(getFilesDir(), "music").getPath());
-                    runOnUiThread(() -> status.setText(out));
-                }).start());
+        findViewById(R.id.btn_settings).setOnClickListener(v -> showSettings());
         findViewById(R.id.btn_up).setOnClickListener(v -> goRoot());
-        findViewById(R.id.btn_queue).setOnClickListener(v -> showQueue());
         findViewById(R.id.letterbar).setOnTouchListener(null);
         ((moe.umbrella.marimo.LetterBar) findViewById(R.id.letterbar))
                 .setListener(bucket -> {
@@ -405,6 +394,28 @@ public class MainActivity extends Activity {
                         toast("queued");
                     }
                 }).show();
+    }
+
+    private void showSettings() {
+        new AlertDialog.Builder(this)
+                .setTitle("settings")
+                .setItems(new String[]{"pick music folder", "rescan",
+                                "run core selftest"},
+                        (d, which) -> {
+                            if (which == 0) {
+                                startActivityForResult(
+                                        new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE),
+                                        REQ_PICK_TREE);
+                            } else if (which == 1) {
+                                rescan();
+                            } else {
+                                new Thread(() -> {
+                                    String out = NativeBridge.runSelftest(
+                                            new File(getFilesDir(), "music").getPath());
+                                    runOnUiThread(() -> status.setText(out));
+                                }).start();
+                            }
+                        }).show();
     }
 
     private void showQueue() {

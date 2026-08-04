@@ -85,7 +85,7 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
 
         session = new MediaSession(this, "marimo");
         session.setCallback(new MediaSession.Callback() {
-            @Override public void onPlay() { play(); }
+            @Override public void onPlay() { play(true); }
             @Override public void onPause() { pause(); }
             @Override public void onSkipToNext() { next(); }
             @Override public void onSkipToPrevious() { prev(); }
@@ -114,24 +114,32 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null) {
-            int pos = intent.getIntExtra(EXTRA_POS, -1);
-            if (pos >= 0) cur = pos;
             String a = intent.getAction();
-            if (ACTION_PLAY.equals(a)) play();
-            else if (ACTION_PAUSE.equals(a)) pause();
-            else if (ACTION_NEXT.equals(a)) next();
-            else if (ACTION_PREV.equals(a)) prev();
+            int pos = intent.getIntExtra(EXTRA_POS, -1);
+            if (pos >= 0) {
+                cur = pos;
+                play(true);           /* explicit track: switch, never pause */
+            } else if (ACTION_PLAY.equals(a)) {
+                toggle();
+            } else if (ACTION_PAUSE.equals(a)) {
+                pause();
+            } else if (ACTION_NEXT.equals(a)) {
+                next();
+            } else if (ACTION_PREV.equals(a)) {
+                prev();
+            }
         }
         return START_NOT_STICKY;
     }
 
-    public void doSeek(int ms) {
-        if (mp != null && mp.isPlaying()) mp.seekTo(ms);
+    private void toggle() {
+        if (mp.isPlaying()) pause();
+        else play(false);
     }
 
-    private void play() {
+    private void play(boolean force) {
         if (cur < 0 || cur >= tracks.size()) return;
-        if (mp.isPlaying()) { pause(); return; }   /* UI button toggles */
+        if (!force && mp.isPlaying()) { pause(); return; }
         Track t = tracks.get(cur);
         try {
             mp.reset();
@@ -147,6 +155,10 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
         }
     }
 
+    public void doSeek(int ms) {
+        if (mp != null && mp.isPlaying()) mp.seekTo(ms);
+    }
+
     private void pause() {
         if (mp.isPlaying()) {
             mp.pause();
@@ -157,12 +169,12 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
     }
 
     private void next() {
-        if (cur < tracks.size() - 1) { cur++; play(); }
-        else if (cur == tracks.size() - 1) { cur = 0; play(); }
+        if (cur < tracks.size() - 1) { cur++; play(true); }
+        else if (cur == tracks.size() - 1) { cur = 0; play(true); }
     }
 
     private void prev() {
-        if (cur > 0) { cur--; play(); }
+        if (cur > 0) { cur--; play(true); }
     }
 
     @Override

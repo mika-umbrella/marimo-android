@@ -65,7 +65,12 @@ public class PlaybackService extends MediaSessionService {
     }
 
     private ExoPlayer makePlayer() {
-        ExoPlayer p = new ExoPlayer.Builder(this).build();
+        ExoPlayer p = new ExoPlayer.Builder(this)
+                .setLoadControl(new androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                        .setBufferDurationsMs(5000, 15000, 500, 1500)
+                        .setPrioritizeTimeOverSizeThresholds(true)
+                        .build())
+                .build();
         p.setRepeatMode(repeat == 2 ? Player.REPEAT_MODE_ONE
                 : repeat == 1 ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
         p.setShuffleModeEnabled(shuffle == 1);
@@ -111,7 +116,8 @@ public class PlaybackService extends MediaSessionService {
                 Math.min(idx, Math.max(0, items.size() - 1)), 0);
         player.prepare();
         player.seekTo(seekMs);
-        player.play();
+        /* stay PAUSED after a seek into a finished track — the play
+         * button resumes; only ACTION_PLAY's own path calls play() */
         if (oldPlayer != null) oldPlayer.release();
         postWidget();
     }

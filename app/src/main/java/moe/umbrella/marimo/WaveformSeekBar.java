@@ -15,7 +15,7 @@ public class WaveformSeekBar extends View {
 
     public interface Listener { void onSeek(int ms); }
 
-    private static final int N_BARS = 48;
+    private static final int N_BARS = 96;
     private final Paint played = new Paint();
     private final Paint rest = new Paint();
     private final Paint line = new Paint();
@@ -71,13 +71,17 @@ public class WaveformSeekBar extends View {
         float frac = (float) (tracking && dragProgress >= 0 ? dragProgress : progress) / max;
         int mid = h / 2;
         int playedX = (int) (w * frac);
+        /* detailed thin waveform — only the UNPLAYED bars are drawn */
         for (int i = 0; i < N_BARS; i++) {
             int x = i * (w / N_BARS) + 1;
-            int bh = Math.max((int) (h * 0.9f * heights[i] / 100f), 3);
-            int top = mid - bh / 2;
-            canvas.drawRect(x, top, x + barW, top + bh,
-                    x <= playedX ? played : rest);
+            if (x > playedX) {
+                int bh = Math.max((int) (h * 0.9f * heights[i] / 100f), 2);
+                int top = mid - bh / 2;
+                canvas.drawRect(x, top, x + barW, top + bh, rest);
+            }
         }
+        /* played portion: flat green fill from the left edge */
+        if (playedX > 0) canvas.drawRect(0, 0, playedX, h, played);
         canvas.drawRect(playedX, 0, playedX + 2, h, line);
     }
 

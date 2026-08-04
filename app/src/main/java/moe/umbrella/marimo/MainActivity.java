@@ -40,7 +40,7 @@ public class MainActivity extends Activity {
     private final List<Album> albums = new ArrayList<>();
     private AlbumAdapter adapter;
     private TextView status, folderName;
-    private LinearLayout screenLibrary, screenPlayer, screenQueue;
+    private LinearLayout screenLibrary, screenPlayer, screenQueue, screenSettings;
     private TextView pTrack, pArtist, pAlbum, pTime;
     private ImageView pArt;
     private moe.umbrella.marimo.WaveformSeekBar pSeek;
@@ -96,6 +96,7 @@ public class MainActivity extends Activity {
         screenLibrary = findViewById(R.id.screen_library);
         screenPlayer = findViewById(R.id.screen_player);
         screenQueue = findViewById(R.id.screen_queue);
+        screenSettings = findViewById(R.id.screen_settings);
         pTrack = findViewById(R.id.p_track);
         pArtist = findViewById(R.id.p_artist);
         pAlbum = findViewById(R.id.p_album);
@@ -155,7 +156,14 @@ public class MainActivity extends Activity {
             return true;
         });
 
-        findViewById(R.id.btn_settings).setOnClickListener(v -> showSettings());
+        findViewById(R.id.btn_settings).setOnClickListener(v -> showTab(3));
+        findViewById(R.id.btn_settings_back).setOnClickListener(v -> showTab(0));
+        findViewById(R.id.set_pick).setOnClickListener(v -> {
+            startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE),
+                    REQ_PICK_TREE);
+        });
+        findViewById(R.id.set_rescan).setOnClickListener(v -> rescan());
+        findViewById(R.id.set_scrobble).setOnClickListener(v -> showScrobbleSettings());
         findViewById(R.id.btn_up).setOnClickListener(v -> goRoot());
         findViewById(R.id.letterbar).setOnTouchListener(null);
         ((moe.umbrella.marimo.LetterBar) findViewById(R.id.letterbar))
@@ -216,6 +224,7 @@ public class MainActivity extends Activity {
         screenLibrary.setVisibility(t == 0 ? View.VISIBLE : View.GONE);
         screenPlayer.setVisibility(t == 1 ? View.VISIBLE : View.GONE);
         screenQueue.setVisibility(t == 2 ? View.VISIBLE : View.GONE);
+        screenSettings.setVisibility(t == 3 ? View.VISIBLE : View.GONE);
         if (t == 2) refreshQueueList();
     }
 
@@ -429,31 +438,6 @@ public class MainActivity extends Activity {
                         toast("queued");
                     }
                 }).show();
-    }
-
-    private void showSettings() {
-        new AlertDialog.Builder(this)
-                .setTitle("settings")
-                .setItems(new String[]{"pick music folder", "rescan",
-                                "scrobble (last.fm + listenbrainz)",
-                                "run core selftest"},
-                        (d, which) -> {
-                            if (which == 0) {
-                                startActivityForResult(
-                                        new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE),
-                                        REQ_PICK_TREE);
-                            } else if (which == 1) {
-                                rescan();
-                            } else if (which == 2) {
-                                showScrobbleSettings();
-                            } else {
-                                new Thread(() -> {
-                                    String out = NativeBridge.runSelftest(
-                                            new File(getFilesDir(), "music").getPath());
-                                    runOnUiThread(() -> status.setText(out));
-                                }).start();
-                            }
-                        }).show();
     }
 
     private void showScrobbleSettings() {

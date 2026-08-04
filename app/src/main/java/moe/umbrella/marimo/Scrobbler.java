@@ -9,6 +9,8 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.TreeMap;
+import java.security.MessageDigest;
 
 /** Last.fm + ListenBrainz scrobbling — same rules as the desktop player:
  *  submit when a track plays >=50% of its duration OR >=4 minutes (and
@@ -17,7 +19,7 @@ import java.util.Map;
 public class Scrobbler {
 
     private static final String LF_API = "https://ws.audioscrobbler.com/2.0/";
-    private static final String LB_API = "https://api.listenbrainz.org/1/";
+    private static final String LB_API = "https://api.listenbrainz.org/1/submit-listens";
 
     private static volatile String lfKey = "";
     private static volatile String lfSecret = "";
@@ -108,10 +110,11 @@ public class Scrobbler {
     /* ---------------- listenbrainz ---------------- */
 
     private static void lbNowPlaying(Track t) {
-        String json = "{\"track_name\":" + jq(t.title.isEmpty() ? t.name : t.title)
+        String json = "{\"listen_type\":\"playing_now\",\"payload\":[{\"track_metadata\":{"
+                + "\"track_name\":" + jq(t.title.isEmpty() ? t.name : t.title)
                 + ",\"artist_name\":" + jq(t.artist)
-                + ",\"release_name\":" + jq(t.album) + "}";
-        postJson(LB_API + "playing-now", json);
+                + ",\"release_name\":" + jq(t.album) + "}}]}";
+        postJson(LB_API, json);
     }
 
     private static void lbScrobble(Track t, long playedMs) {
@@ -121,7 +124,7 @@ public class Scrobbler {
                 + ",\"release_name\":" + jq(t.album)
                 + ",\"additional_info\":{\"duration_ms\":" + t.durationMs
                 + ",\"media_player\":\"marimo\"}}}]}";
-        postJson(LB_API + "submit-listens", payload);
+        postJson(LB_API, payload);
     }
 
     private static String jq(String s) {
@@ -141,8 +144,32 @@ public class Scrobbler {
 
     /* ---------------- http ---------------- */
 
+    /** last.fm write methods require api_sig: md5(sorted "keyvalue" + secret) */
+    private static String apiSig(Map<String, String> params) {
+        TreeMap<String, String> sorted = new TreeMap<>(params);
+        StringBuilder s = new StringBuilder();
+        for (Map.Entry<String, String> e : sorted.entrySet())
+            s.append(e.getKey()).append(e.getValue());
+        s.append(lfSecret);
+        return md5Hex(s.toString());
+    }
+
+    private static String md5Hex(String s) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] d = md.digest(s.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : d) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     private static void post(String url, Map<String, String> params, boolean lfSigned) {
         try {
+            if (lfSigned && !lfSecret.isEmpty())
+                params.put("api_sig", apiSig(params));
             StringBuilder body = new StringBuilder();
             for (Map.Entry<String, String> e : params.entrySet()) {
                 if (body.length() > 0) body.append('&');
@@ -161,10 +188,25 @@ public class Scrobbler {
                 os.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }
             int code = c.getResponseCode();
-            Log.i("marimo", "lf post -> " + code + " (" + url + ")");
+            String resp = readBody(c, code);
+            Log.i("marimo", "lf post -> " + code + " body=" + resp);
             c.disconnect();
         } catch (Exception e) {
             Log.e("marimo", "lf post failed: " + e);
+        }
+    }
+
+    private static String readBody(HttpURLConnection c, int code) {
+        try {
+            java.io.InputStream is = code >= 400 ? c.getErrorStream() : c.getInputStream();
+            if (is == null) return "";
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[512];
+            int n;
+            while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
+            return new String(bos.toByteArray(), StandardCharsets.UTF_8).trim();
+        } catch (Exception e) {
+            return "";
         }
     }
 
@@ -182,7 +224,7 @@ public class Scrobbler {
                 os.write(json.getBytes(StandardCharsets.UTF_8));
             }
             int code = c.getResponseCode();
-            Log.i("marimo", "lb post -> " + code);
+            Log.i("marimo", "lb post -> " + code + " body=" + readBody(c, code));
             c.disconnect();
         } catch (Exception e) {
             Log.e("marimo", "lb post failed: " + e);

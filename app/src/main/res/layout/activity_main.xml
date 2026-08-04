@@ -243,22 +243,22 @@
 
                 <ImageButton
                     android:id="@+id/p_shuffle"
-                    android:layout_width="56dp"
-                    android:layout_height="44dp"
+                    android:layout_width="60dp"
+                    android:layout_height="52dp"
                     android:scaleType="fitCenter"
-                    android:paddingTop="6dp"
-                    android:paddingBottom="6dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp"
                     android:src="@drawable/ic_shuffle"
                     android:background="?android:attr/selectableItemBackground"
                     android:contentDescription="shuffle" />
 
                 <ImageButton
                     android:id="@+id/p_repeat"
-                    android:layout_width="56dp"
-                    android:layout_height="44dp"
+                    android:layout_width="60dp"
+                    android:layout_height="52dp"
                     android:scaleType="fitCenter"
-                    android:paddingTop="6dp"
-                    android:paddingBottom="6dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp"
                     android:src="@drawable/ic_repeat"
                     android:background="?android:attr/selectableItemBackground"
                     android:contentDescription="repeat" />

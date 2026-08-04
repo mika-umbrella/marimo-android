@@ -50,12 +50,13 @@
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
 
-                <Button
+                <ImageButton
                     android:id="@+id/btn_up"
-                    android:layout_width="56dp"
+                    android:layout_width="48dp"
                     android:layout_height="36dp"
-                    android:text="⬆"
-                    android:textSize="16sp" />
+                    android:src="@drawable/ic_up"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:contentDescription="up" />
 
                 <TextView
                     android:id="@+id/folder_name"
@@ -275,6 +276,16 @@
         android:background="#0d0d0f">
 
         <Button
+            android:id="@+id/tab_queue"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackground"
+            android:text="queue"
+            android:textColor="#e8ddd0"
+            android:textSize="13sp" />
+
+        <Button
             android:id="@+id/tab_player"
             android:layout_width="0dp"
             android:layout_height="match_parent"
@@ -291,16 +302,6 @@
             android:layout_weight="1"
             android:background="?android:attr/selectableItemBackground"
             android:text="library"
-            android:textColor="#e8ddd0"
-            android:textSize="13sp" />
-
-        <Button
-            android:id="@+id/tab_queue"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:background="?android:attr/selectableItemBackground"
-            android:text="queue"
             android:textColor="#e8ddd0"
             android:textSize="13sp" />
     </LinearLayout>

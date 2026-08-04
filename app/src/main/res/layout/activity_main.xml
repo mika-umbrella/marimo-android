@@ -195,29 +195,32 @@
                 android:layout_marginTop="10dp"
                 android:orientation="horizontal">
 
-                <Button
+                <ImageButton
                     android:id="@+id/p_prev"
                     android:layout_width="0dp"
                     android:layout_height="64dp"
                     android:layout_weight="1"
-                    android:text="◀|"
-                    android:textSize="22sp" />
+                    android:src="@android:drawable/ic_media_previous"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:contentDescription="previous" />
 
-                <Button
+                <ImageButton
                     android:id="@+id/p_play"
                     android:layout_width="0dp"
                     android:layout_height="64dp"
                     android:layout_weight="1"
-                    android:text="|▶"
-                    android:textSize="22sp" />
+                    android:src="@android:drawable/ic_media_play"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:contentDescription="play/pause" />
 
-                <Button
+                <ImageButton
                     android:id="@+id/p_next"
                     android:layout_width="0dp"
                     android:layout_height="64dp"
                     android:layout_weight="1"
-                    android:text="▶|"
-                    android:textSize="22sp" />
+                    android:src="@android:drawable/ic_media_next"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:contentDescription="next" />
             </LinearLayout>
 
             <Button

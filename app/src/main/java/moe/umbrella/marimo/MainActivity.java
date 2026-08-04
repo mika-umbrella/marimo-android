@@ -15,6 +15,7 @@ import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -43,7 +44,8 @@ public class MainActivity extends Activity {
     private TextView pTrack, pArtist, pAlbum, pTime;
     private ImageView pArt;
     private moe.umbrella.marimo.WaveformSeekBar pSeek;
-    private Button pPlay, pQueueToggle;
+    private ImageButton pPlay;
+    private Button pQueueToggle;
     private ListView pQueue;
     private boolean queueVisible;
     private Uri treeUri;
@@ -195,6 +197,12 @@ public class MainActivity extends Activity {
 
     /* ---------------- library / album grouping ---------------- */
 
+    private void addAlbum(Album a) {
+        for (Album have : albums)
+            if (have.folder.equals(a.folder)) return;   /* dedupe by folder */
+        albums.add(a);
+    }
+
     private void rescan() {
         new Thread(() -> {
             albums.clear();
@@ -257,14 +265,14 @@ public class MainActivity extends Activity {
                             if (a.coverIdx < 0 && tr.art != null) a.coverIdx = a.tracks.size();
                             a.tracks.add(tr);
                         }
-                if (!a.tracks.isEmpty()) albums.add(a);
+                if (!a.tracks.isEmpty()) addAlbum(a);
             } else if (f.isFile() && isAudio(f.getName())) {
                 Album loose = new Album("(loose files)");
                 Track tr = new Track(f.getAbsolutePath(), f.getName());
                 readTags(tr);
                 if (loose.coverIdx < 0 && tr.art != null) loose.coverIdx = 0;
                 loose.tracks.add(tr);
-                albums.add(loose);
+                addAlbum(loose);
             }
         }
     }
@@ -280,14 +288,14 @@ public class MainActivity extends Activity {
                         if (a.coverIdx < 0 && tr.art != null) a.coverIdx = a.tracks.size();
                         a.tracks.add(tr);
                     }
-                if (!a.tracks.isEmpty()) albums.add(a);
+                if (!a.tracks.isEmpty()) addAlbum(a);
             } else if (f.isFile() && isAudio(f.getName())) {
                 Album loose = new Album("(loose files)");
                 Track tr = new Track(f.getUri().toString(), f.getName());
                 readTags(tr);
                 if (loose.coverIdx < 0 && tr.art != null) loose.coverIdx = 0;
                 loose.tracks.add(tr);
-                albums.add(loose);
+                addAlbum(loose);
             }
         }
     }
@@ -436,10 +444,14 @@ public class MainActivity extends Activity {
         pArtist.setText(t.artist);
         pAlbum.setText(t.album);
         pArt.setImageBitmap(t.art);
-        /* real waveform (async decode), falls back to the PRNG skyline */
-        int[] peaks = WaveformExtractor.get(this, t.token);
-        if (peaks != null) pSeek.setWaveformPeaks(peaks);
-        else pSeek.setWaveformSeed(hash(t.token));
+        /* real waveform (async decode — never block the UI thread) */
+        pSeek.setWaveformSeed(hash(t.token));
+        new Thread(() -> {
+            int[] peaks = WaveformExtractor.get(this, t.token);
+            runOnUiThread(() -> {
+                if (peaks != null) pSeek.setWaveformPeaks(peaks);
+            });
+        }).start();
         refreshQueueList();
     }
 
@@ -464,7 +476,9 @@ public class MainActivity extends Activity {
 
     private void updatePlayerUi() {
         boolean playing = PlaybackService.isPlaying();
-        pPlay.setText(playing ? "❚❚" : "|▶");
+        pPlay.setImageResource(playing
+                ? android.R.drawable.ic_media_pause
+                : android.R.drawable.ic_media_play);
         long pos = PlaybackService.position();
         long dur = PlaybackService.duration();
         if (dur > 0) {

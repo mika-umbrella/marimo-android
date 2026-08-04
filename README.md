@@ -23,7 +23,10 @@ published.** the port strategy: keep the C core, rebuild the UI layer.
 - [x] **M4 — playback** — MediaPlayer service + MediaSession (lockscreen/BT
       keys) + foreground notification. mpv-android stays the future upgrade
       for true gapless
-- [~] **M5 — UI (partial)** — track list + controls + status line work;
+- [x] **M5 — touch UI** — bottom tabs (player/library), player screen with
+      big art + title/artist/album + 64dp transport, 64dp track rows with
+      cover thumbs. embedded art extraction is now a CORE feature (FLAC
+      picture blocks + ID3 APIC) since MediaPlayer doesn't hand over art.
       the pixel marimo face (unifont UI) is the remaining dream
 - [ ] M6 — scrobbling: core/scrobble.c + libcurl for android, or the app does
       HTTP in kotlin

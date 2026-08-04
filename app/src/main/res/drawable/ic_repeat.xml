@@ -4,9 +4,29 @@
     android:height="24dp"
     android:viewportWidth="26"
     android:viewportHeight="26">
-    <!-- repeat loop, full-size path in a 26 viewport so it matches the
-         shuffle's inset and nothing touches the edge -->
+    <!-- repeat: feather loop arrows — matches the shuffle/transport set -->
     <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M7,7h10v3l4,-4 -4,-4v3L5,5v6h2zM17,17L7,17v-3l-4,4 4,4v-3h12v-6h-2z" />
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M18 3l4 4-4 4" />
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4 12v-1a4 4 0 0 1 4-4h14" />
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="m8 23-4-4 4-4" />
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M22 14v1a4 4 0 0 1-4 4H4" />
 </vector>

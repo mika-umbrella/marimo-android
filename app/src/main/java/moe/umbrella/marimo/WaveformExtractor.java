@@ -20,7 +20,7 @@ import java.util.Map;
  *  background thread (a full decode takes ~1s for a 3-minute track). */
 public class WaveformExtractor {
 
-    public static final int BUCKETS = 48;
+    public static final int BUCKETS = 96;
     private static final Map<String, int[]> cache = new HashMap<>();
 
     public static synchronized int[] get(Context ctx, String token) {
@@ -79,6 +79,7 @@ public class WaveformExtractor {
         if (codec == null) { ex.release(); return null; }
 
         long[] sumsq = new long[BUCKETS];
+        int[] maxAmp = new int[BUCKETS];
         long[] counts = new long[BUCKETS];
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
         boolean eos = false;
@@ -112,7 +113,9 @@ public class WaveformExtractor {
                             int b = (int) ((bufStart + i) * BUCKETS / total);
                             if (b < 0) b = 0;
                             if (b >= BUCKETS) b = BUCKETS - 1;
+                            int v = s < 0 ? -s : s;
                             sumsq[b] += (long) s * s;
+                            if (v > maxAmp[b]) maxAmp[b] = v;
                             counts[b]++;
                         }
                     }
@@ -125,24 +128,27 @@ public class WaveformExtractor {
             return null;
         }
 
-        double[] rms = new double[BUCKETS];
-        for (int i = 0; i < BUCKETS; i++)
-            rms[i] = counts[i] > 0 ? Math.sqrt((double) sumsq[i] / counts[i]) : 0;
-        double[] sorted = rms.clone();
-        Arrays.sort(sorted);
-        double ref = sorted[(int) (BUCKETS * 0.95)];
-        if (ref < 1) ref = 1;
-
+        /* dB per bucket, then PERCENTILE STRETCH: brickwall-limited loud
+         * masters sit in a tiny window near the ceiling — map the real
+         * distribution (p15..p95) across the full height so every dip
+         * (intro, verse, silence) becomes visible structure */
+        double[] db = new double[BUCKETS];
+        for (int i = 0; i < BUCKETS; i++) {
+            if (counts[i] == 0) { db[i] = -120; continue; }
+            double rms = Math.sqrt((double) sumsq[i] / counts[i]);
+            db[i] = 20.0 * Math.log10(rms / 32768.0 + 1e-12);
+        }
+        double[] sortedDb = db.clone();
+        Arrays.sort(sortedDb);
+        double lo = sortedDb[Math.max(0, (int) (BUCKETS * 0.15))];
+        double hi = sortedDb[Math.min(BUCKETS - 1, (int) (BUCKETS * 0.95))];
+        if (hi - lo < 1.0) hi = lo + 1.0;
         int[] peaks = new int[BUCKETS];
         for (int i = 0; i < BUCKETS; i++) {
-            int p;
-            if (counts[i] == 0) p = 0;
-            else {
-                double r = rms[i] / ref;          /* 0..1 */
-                p = (int) (100.0 * Math.sqrt(r)); /* sqrt: spread mid-range */
-                if (p < 4) p = 4;
-                if (p > 100) p = 100;
-            }
+            double r = (db[i] - lo) / (hi - lo);
+            int p = (int) (100.0 * r);
+            if (p < 4) p = 4;
+            if (p > 100) p = 100;
             peaks[i] = p;
         }
         codec.release();

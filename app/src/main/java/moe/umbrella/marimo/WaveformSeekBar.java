@@ -3,6 +3,8 @@ package moe.umbrella.marimo;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Path;
+import android.os.SystemClock;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
@@ -21,10 +23,12 @@ public class WaveformSeekBar extends View {
     private final Paint line = new Paint();
     private int max = 1, progress = 0;
     private int dragProgress = -1;
+    private long ignoreTicksUntil;
     private int[] heights;
     private boolean tracking;
     private Listener listener;
     private boolean hasReal;
+    private final Path wavePath = new Path();
 
     public WaveformSeekBar(Context c, AttributeSet a) {
         super(c, a);
@@ -54,10 +58,11 @@ public class WaveformSeekBar extends View {
     }
 
     public void setMax(int m) { max = Math.max(m, 1); invalidate(); }
-    /** external updates (the 200ms ticker) — ignored while dragging so the
-     *  thumb doesn't snap back under the finger */
+    /** external updates (the 200ms ticker) — ignored while dragging AND
+     *  for a short grace after a seek, so the bar holds the dragged
+     *  position while the player catches up (no flash-back) */
     public void setProgress(int p) {
-        if (tracking) return;
+        if (tracking || SystemClock.uptimeMillis() < ignoreTicksUntil) return;
         if (p < 0) p = 0;
         if (p > max) p = max;
         if (p != progress) { progress = p; invalidate(); }
@@ -67,20 +72,30 @@ public class WaveformSeekBar extends View {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         int w = getWidth(), h = getHeight();
-        int barW = Math.max(w / N_BARS - 2, 1);
         float frac = (float) (tracking && dragProgress >= 0 ? dragProgress : progress) / max;
-        int mid = h / 2;
         int playedX = (int) (w * frac);
-        /* detailed thin waveform — only the UNPLAYED bars are drawn */
+        int mid = h / 2;
+
+        /* continuous filled waveform silhouette (no gaps — a real render
+         * look): amplitude envelope on top, mirrored on the bottom */
+        wavePath.reset();
+        wavePath.moveTo(0, mid);
+        float colW = w / (float) N_BARS;
         for (int i = 0; i < N_BARS; i++) {
-            int x = i * (w / N_BARS) + 1;
-            if (x > playedX) {
-                int bh = Math.max((int) (h * 0.9f * heights[i] / 100f), 2);
-                int top = mid - bh / 2;
-                canvas.drawRect(x, top, x + barW, top + bh, rest);
-            }
+            float x = i * colW + colW / 2f;
+            float amp = h * 0.42f * heights[i] / 100f;
+            wavePath.lineTo(x, mid - amp);
         }
-        /* played portion: flat green fill from the left edge */
+        wavePath.lineTo(w, mid);
+        for (int i = N_BARS - 1; i >= 0; i--) {
+            float x = i * colW + colW / 2f;
+            float amp = h * 0.42f * heights[i] / 100f;
+            wavePath.lineTo(x, mid + amp);
+        }
+        wavePath.close();
+        canvas.drawPath(wavePath, rest);
+
+        /* played portion: flat green fill over the silhouette */
         if (playedX > 0) canvas.drawRect(0, 0, playedX, h, played);
         canvas.drawRect(playedX, 0, playedX + 2, h, line);
     }
@@ -97,9 +112,12 @@ public class WaveformSeekBar extends View {
                 invalidate();
                 return true;
             case MotionEvent.ACTION_UP:
-                android.util.Log.i("marimo", "seekbar UP drag=" + dragProgress
-                        + " max=" + max);
                 if (tracking && listener != null) listener.onSeek(dragProgress);
+                /* optimistic: keep the bar at the dragged position while
+                 * the player seeks — ticker corrections are ignored for a
+                 * beat so it doesn't flash back to the old spot */
+                if (dragProgress >= 0) progress = dragProgress;
+                ignoreTicksUntil = SystemClock.uptimeMillis() + 700;
                 tracking = false;
                 dragProgress = -1;
                 invalidate();

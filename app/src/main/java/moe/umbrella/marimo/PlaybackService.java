@@ -35,7 +35,8 @@ public class PlaybackService extends MediaSessionService {
 
     private ExoPlayer player;
     private MediaSession session;
-    private Thread ticker;
+    private android.os.Handler tickHandler;
+    private Runnable ticker;
 
     public static void setTracksStatic(List<Track> list) {
         synchronized (tracks) {
@@ -113,21 +114,34 @@ public class PlaybackService extends MediaSessionService {
             }
         });
 
-        ticker = new Thread(() -> {
-            while (!Thread.currentThread().isInterrupted()) {
-                try {
-                    if (player != null) {
-                        positionMs = player.getCurrentPosition();
-                        durationMs = player.getDuration();
+        final android.os.Handler tickHandler =
+                new android.os.Handler(android.os.Looper.getMainLooper());
+        final Runnable ticker = new Runnable() {
+            @Override
+            public void run() {
+                if (player != null) {
+                    long dur = player.getDuration();
+                    if (dur == androidx.media3.common.C.TIME_UNSET
+                            || dur <= 0) {
+                        dur = 0;
+                        androidx.media3.common.MediaItem mi =
+                                player.getCurrentMediaItem();
+                        if (mi != null && mi.localConfiguration != null
+                                && mi.localConfiguration.tag instanceof Track) {
+                            Track t = (Track) mi.localConfiguration.tag;
+                            dur = t.durationMs;
+                        }
                     }
-                    Thread.sleep(200);
-                } catch (InterruptedException e) {
-                    break;
-                } catch (Exception ignored) {
+                    durationMs = dur;
+                    positionMs = player.getCurrentPosition();
                 }
+                tickHandler.postDelayed(this, 200);
             }
-        });
-        ticker.start();
+        };
+        tickHandler.post(ticker);
+        /* keep a reference so onDestroy can stop it */
+        this.tickHandler = tickHandler;
+        this.ticker = ticker;
     }
 
     @Override
@@ -235,7 +249,7 @@ public class PlaybackService extends MediaSessionService {
     @Override
     public void onDestroy() {
         playing = false;
-        if (ticker != null) ticker.interrupt();
+        if (tickHandler != null && ticker != null) tickHandler.removeCallbacks(ticker);
         if (session != null) session.release();
         if (player != null) player.release();
         super.onDestroy();

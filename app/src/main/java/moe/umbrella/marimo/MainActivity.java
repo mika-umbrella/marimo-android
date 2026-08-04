@@ -513,10 +513,11 @@ public class MainActivity extends Activity {
         if (rp != null) rp.setAlpha(PlaybackService.repeat() > 0 ? 1f : 0.3f);
         long pos = PlaybackService.position();
         long dur = PlaybackService.duration();
+        pTime.setText(dur > 0 ? fmt(pos) + " / " + fmt(dur)
+                : fmt(pos) + " / --:--");
         if (dur > 0) {
             pSeek.setMax((int) dur);
             pSeek.setProgress((int) pos);
-            pTime.setText(fmt(pos) + " / " + fmt(dur));
         }
     }
 

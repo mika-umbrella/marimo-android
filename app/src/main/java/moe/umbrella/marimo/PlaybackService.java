@@ -19,7 +19,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-/** MediaPlayer-backed playback + MediaSession (lockscreen / BT keys). */
+/** MediaPlayer-backed playback + MediaSession + queue + seek + position. */
 public class PlaybackService extends Service implements MediaPlayer.OnCompletionListener {
 
     public static final String ACTION_PLAY = "moe.umbrella.marimo.PLAY";
@@ -33,14 +33,44 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
     private MediaPlayer mp;
     private MediaSession session;
     private static volatile List<Track> tracks = new ArrayList<>();
+    private static volatile boolean playing;
+    private static volatile long positionMs, durationMs;
+    private static volatile PlaybackService instance;
     private int cur = -1;
+    private Thread ticker;
 
-    /** MainActivity hands the current track list here before starting us. */
     public static void setTracksStatic(List<Track> list) { tracks = list; }
+
+    /** peek the current queue (for the queue dialog) */
+    public static List<Track> peekQueue() {
+        synchronized (tracks) { return new ArrayList<>(tracks); }
+    }
+
+    /** seek the live player (called from the seekbar) */
+    public static void seek(int ms) {
+        PlaybackService s = instance;
+        if (s != null && s.mp != null) s.mp.seekTo(ms);
+    }
+
+    /** append to the play queue; returns the index of the first added */
+    public static int addToQueueStatic(List<Track> add) {
+        synchronized (tracks) {
+            int first = tracks.size();
+            tracks.addAll(add);
+            return first;
+        }
+    }
+
+    public static void seekTo(int ms) { /* handled via service instance */ }
+
+    public static boolean isPlaying() { return playing; }
+    public static long position() { return positionMs; }
+    public static long duration() { return durationMs; }
 
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         mp = new MediaPlayer();
         mp.setAudioAttributes(new AudioAttributes.Builder()
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
@@ -59,9 +89,26 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
             @Override public void onPause() { pause(); }
             @Override public void onSkipToNext() { next(); }
             @Override public void onSkipToPrevious() { prev(); }
+            @Override public void onSeekTo(long pos) { if (mp != null) mp.seekTo((int) pos); }
             @Override public void onStop() { stopSelf(); }
         });
         session.setActive(true);
+
+        ticker = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    if (playing && mp != null) {
+                        positionMs = mp.getCurrentPosition();
+                        durationMs = mp.getDuration();
+                    }
+                    Thread.sleep(200);
+                } catch (InterruptedException e) {
+                    break;
+                } catch (Exception ignored) {
+                }
+            }
+        });
+        ticker.start();
     }
 
     @Override
@@ -78,7 +125,9 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
         return START_NOT_STICKY;
     }
 
-    public void setTracks(List<Track> list) { tracks = list; }
+    public void doSeek(int ms) {
+        if (mp != null && mp.isPlaying()) mp.seekTo(ms);
+    }
 
     private void play() {
         if (cur < 0 || cur >= tracks.size()) return;
@@ -89,6 +138,8 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
             mp.setDataSource(this, Uri.parse(t.token));
             mp.prepare();
             mp.start();
+            playing = true;
+            durationMs = mp.getDuration();
             publish(t);
             startForeground(1, buildNotification(t, true));
         } catch (IOException e) {
@@ -99,12 +150,15 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
     private void pause() {
         if (mp.isPlaying()) {
             mp.pause();
+            playing = false;
+            positionMs = mp.getCurrentPosition();
             updateNotification();
         }
     }
 
     private void next() {
         if (cur < tracks.size() - 1) { cur++; play(); }
+        else if (cur == tracks.size() - 1) { cur = 0; play(); }
     }
 
     private void prev() {
@@ -121,19 +175,20 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
                 .putString(MediaMetadata.METADATA_KEY_ALBUM, t.album)
                 .build();
         session.setMetadata(md);
-        session.setPlaybackState(new android.media.session.PlaybackState.Builder()
+        session.setPlaybackState(new PlaybackState.Builder()
                 .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE
-                        | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS)
+                        | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS
+                        | PlaybackState.ACTION_SEEK_TO)
                 .setState(PlaybackState.STATE_PLAYING, mp.getCurrentPosition(), 1f)
                 .build());
     }
 
-    private Notification buildNotification(Track t, boolean playing) {
+    private Notification buildNotification(Track t, boolean isPlaying) {
         Intent open = new Intent(this, MainActivity.class);
         PendingIntent pi = PendingIntent.getActivity(this, 0, open,
                 PendingIntent.FLAG_IMMUTABLE);
         Intent playPause = new Intent(this, PlaybackService.class)
-                .setAction(playing ? ACTION_PAUSE : ACTION_PLAY);
+                .setAction(isPlaying ? ACTION_PAUSE : ACTION_PLAY);
         PendingIntent pp = PendingIntent.getService(this, 1, playPause,
                 PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder b = new Notification.Builder(this, CHANNEL_ID)
@@ -149,8 +204,8 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
                             new Intent(this, PlaybackService.class).setAction(ACTION_PREV),
                             PendingIntent.FLAG_IMMUTABLE)).build());
             b.addAction(new Notification.Action.Builder(
-                    playing ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play,
-                    playing ? "pause" : "play", pp).build());
+                    isPlaying ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play,
+                    isPlaying ? "pause" : "play", pp).build());
             b.addAction(new Notification.Action.Builder(
                     android.R.drawable.ic_media_next, "next",
                     PendingIntent.getService(this, 3,
@@ -168,6 +223,8 @@ public class PlaybackService extends Service implements MediaPlayer.OnCompletion
 
     @Override
     public void onDestroy() {
+        playing = false;
+        if (ticker != null) ticker.interrupt();
         mp.release();
         session.release();
         super.onDestroy();

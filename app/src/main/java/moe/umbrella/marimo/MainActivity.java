@@ -1,27 +1,32 @@
 package moe.umbrella.marimo;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.ParcelFileDescriptor;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ArrayAdapter;
+import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.documentfile.provider.DocumentFile;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 public class MainActivity extends Activity {
@@ -29,13 +34,24 @@ public class MainActivity extends Activity {
     private static final int REQ_PICK_TREE = 7;
     private static final String PREFS = "marimo", KEY_TREE = "tree_uri";
 
-    private final List<Track> tracks = new ArrayList<>();
-    private TrackAdapter adapter;
-    private TextView status, nowplaying;
+    private final List<Object> entries = new ArrayList<>();
+    private final List<Album> albums = new ArrayList<>();
+    private AlbumAdapter adapter;
+    private TextView status, folderName;
     private LinearLayout screenLibrary, screenPlayer;
-    private TextView pTitle, pTrack, pArtist, pAlbum;
+    private TextView pTrack, pArtist, pAlbum, pTime;
     private ImageView pArt;
+    private moe.umbrella.marimo.WaveformSeekBar pSeek;
+    private Button pPlay;
     private Uri treeUri;
+    private Album openAlbum;         // null = root (albums), else its tracks
+    private final Handler handler = new Handler();
+    private final Runnable uiTick = new Runnable() {
+        @Override public void run() {
+            updatePlayerUi();
+            handler.postDelayed(this, 200);
+        }
+    };
 
     private static boolean isAudio(String name) {
         String n = name.toLowerCase();
@@ -72,26 +88,30 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         status = findViewById(R.id.status);
+        folderName = findViewById(R.id.folder_name);
         screenLibrary = findViewById(R.id.screen_library);
         screenPlayer = findViewById(R.id.screen_player);
-        pTitle = findViewById(R.id.p_title);
         pTrack = findViewById(R.id.p_track);
         pArtist = findViewById(R.id.p_artist);
         pAlbum = findViewById(R.id.p_album);
+        pTime = findViewById(R.id.p_time);
         pArt = findViewById(R.id.p_art);
+        pSeek = findViewById(R.id.p_seek);
+        pPlay = findViewById(R.id.p_play);
 
-        adapter = new TrackAdapter();
+        adapter = new AlbumAdapter(this, entries);
         ListView list = findViewById(R.id.tracklist);
         list.setAdapter(adapter);
         list.setOnItemClickListener((p, v, pos, id) -> {
-            if (pos < 0 || pos >= tracks.size()) return;
-            Track t = tracks.get(pos);
-            PlaybackService.setTracksStatic(tracks);
-            startService(new Intent(this, PlaybackService.class)
-                    .setAction(PlaybackService.ACTION_PLAY)
-                    .putExtra(PlaybackService.EXTRA_POS, pos));
-            showNowPlaying(t);
-            showTab(true);           /* jump to the player screen */
+            Object o = adapter.getItem(pos);
+            if (o instanceof Album) openAlbum((Album) o);
+            else playTrack((Track) o);
+        });
+        list.setOnItemLongClickListener((p, v, pos, id) -> {
+            Object o = adapter.getItem(pos);
+            if (o instanceof Album) albumMenu((Album) o);
+            else trackMenu((Track) o);
+            return true;
         });
 
         findViewById(R.id.btn_pick).setOnClickListener(v -> {
@@ -105,8 +125,20 @@ public class MainActivity extends Activity {
                             new File(getFilesDir(), "music").getPath());
                     runOnUiThread(() -> status.setText(out));
                 }).start());
+        findViewById(R.id.btn_up).setOnClickListener(v -> goRoot());
+        findViewById(R.id.btn_queue).setOnClickListener(v -> showQueue());
+        findViewById(R.id.letterbar).setOnTouchListener(null);
+        ((moe.umbrella.marimo.LetterBar) findViewById(R.id.letterbar))
+                .setListener(bucket -> {
+                    if (openAlbum == null) {
+                        int i = adapter.findFirstBucket(bucket);
+                        if (i >= 0)
+                            ((ListView) findViewById(R.id.tracklist))
+                                    .setSelection(i);
+                    }
+                });
 
-        /* player screen controls */
+        /* player screen */
         findViewById(R.id.p_play).setOnClickListener(v ->
                 startService(new Intent(this, PlaybackService.class)
                         .setAction(PlaybackService.ACTION_PLAY)));
@@ -116,8 +148,8 @@ public class MainActivity extends Activity {
         findViewById(R.id.p_next).setOnClickListener(v ->
                 startService(new Intent(this, PlaybackService.class)
                         .setAction(PlaybackService.ACTION_NEXT)));
+        pSeek.setListener(ms -> moe.umbrella.marimo.PlaybackService.seek(ms));
 
-        /* bottom tabs */
         findViewById(R.id.tab_library).setOnClickListener(v -> showTab(false));
         findViewById(R.id.tab_player).setOnClickListener(v -> showTab(true));
 
@@ -133,6 +165,7 @@ public class MainActivity extends Activity {
         }
 
         rescan();
+        handler.post(uiTick);
     }
 
     private void showTab(boolean player) {
@@ -140,43 +173,105 @@ public class MainActivity extends Activity {
         screenPlayer.setVisibility(player ? View.VISIBLE : View.GONE);
     }
 
+    /* ---------------- library / album grouping ---------------- */
+
     private void rescan() {
-        tracks.clear();
         new Thread(() -> {
-            scanAppDirInto(tracks);
+            albums.clear();
+            openAlbum = null;
+            scanAppDirInto(null);
             if (treeUri != null) scanTree(DocumentFile.fromTreeUri(this, treeUri));
+            Collections.sort(albums, (a, b) ->
+                    a.folder.compareToIgnoreCase(b.folder));
             runOnUiThread(() -> {
+                buildEntries();
                 adapter.notifyDataSetChanged();
-                status.setText(tracks.size() + " tracks indexed");
+                status.setText(albums.size() + " albums · "
+                        + totalTracks() + " tracks");
             });
         }).start();
     }
 
-    private void scanAppDirInto(List<Track> into) {
+    private int totalTracks() {
+        int n = 0;
+        for (Album a : albums) n += a.tracks.size();
+        return n;
+    }
+
+    private void buildEntries() {
+        entries.clear();
+        for (Album a : albums) entries.add(a);
+    }
+
+    private void openAlbum(Album a) {
+        openAlbum = a;
+        entries.clear();
+        entries.addAll(a.tracks);
+        folderName.setText(a.folder);
+        adapter.notifyDataSetChanged();
+    }
+
+    private void goRoot() {
+        openAlbum = null;
+        folderName.setText("library");
+        buildEntries();
+        adapter.notifyDataSetChanged();
+    }
+
+    /* ---------------- scanning ---------------- */
+
+    private void scanAppDirInto(Void unused) {
         File dir = new File(getFilesDir(), "music");
         dir.mkdirs();
         File[] files = dir.listFiles();
-        if (files != null)
-            for (File f : files)
-                if (f.isFile() && isAudio(f.getName())) {
-                    Track t = new Track(f.getAbsolutePath(), f.getName());
-                    readTags(t);
-                    into.add(t);
-                }
-    }
-
-    private void scanTree(DocumentFile dir) {
-        for (DocumentFile f : dir.listFiles()) {
-            if (f.isDirectory()) scanTree(f);
-            else if (f.isFile() && isAudio(f.getName())) {
-                Track t = new Track(f.getUri().toString(), f.getName());
-                readTags(t);
-                tracks.add(t);
+        if (files == null) return;
+        for (File f : files) {
+            if (f.isDirectory()) {
+                Album a = new Album(f.getName());
+                File[] ts = f.listFiles();
+                if (ts != null)
+                    for (File t : ts)
+                        if (t.isFile() && isAudio(t.getName())) {
+                            Track tr = new Track(t.getAbsolutePath(), t.getName());
+                            readTags(tr);
+                            if (a.coverIdx < 0 && tr.art != null) a.coverIdx = a.tracks.size();
+                            a.tracks.add(tr);
+                        }
+                if (!a.tracks.isEmpty()) albums.add(a);
+            } else if (f.isFile() && isAudio(f.getName())) {
+                Album loose = new Album("(loose files)");
+                Track tr = new Track(f.getAbsolutePath(), f.getName());
+                readTags(tr);
+                if (loose.coverIdx < 0 && tr.art != null) loose.coverIdx = 0;
+                loose.tracks.add(tr);
+                albums.add(loose);
             }
         }
     }
 
-    /** Tags via the C core: fd route for SAF URIs, path route for real paths. */
+    private void scanTree(DocumentFile dir) {
+        for (DocumentFile f : dir.listFiles()) {
+            if (f.isDirectory()) {
+                Album a = new Album(f.getName());
+                for (DocumentFile t : f.listFiles())
+                    if (t.isFile() && isAudio(t.getName())) {
+                        Track tr = new Track(t.getUri().toString(), t.getName());
+                        readTags(tr);
+                        if (a.coverIdx < 0 && tr.art != null) a.coverIdx = a.tracks.size();
+                        a.tracks.add(tr);
+                    }
+                if (!a.tracks.isEmpty()) albums.add(a);
+            } else if (f.isFile() && isAudio(f.getName())) {
+                Album loose = new Album("(loose files)");
+                Track tr = new Track(f.getUri().toString(), f.getName());
+                readTags(tr);
+                if (loose.coverIdx < 0 && tr.art != null) loose.coverIdx = 0;
+                loose.tracks.add(tr);
+                albums.add(loose);
+            }
+        }
+    }
+
     private void readTags(Track t) {
         try {
             byte[] title = new byte[512], artist = new byte[512], album = new byte[512];
@@ -209,7 +304,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** Embedded cover art via the C core (new!). */
     private Bitmap loadArt(String token) {
         try {
             byte[] raw;
@@ -232,36 +326,119 @@ public class MainActivity extends Activity {
         }
     }
 
+    /* ---------------- playback ---------------- */
+
+    private void playTrack(Track t) {
+        List<Track> ctx = tracksOf(t);
+        PlaybackService.setTracksStatic(new ArrayList<>(ctx));
+        startService(new Intent(this, PlaybackService.class)
+                .setAction(PlaybackService.ACTION_PLAY)
+                .putExtra(PlaybackService.EXTRA_POS, ctx.indexOf(t)));
+        showNowPlaying(t);
+        showTab(true);
+    }
+
+    private List<Track> tracksOf(Track t) {
+        for (Album a : albums)
+            for (Track x : a.tracks)
+                if (x == t) return a.tracks;
+        return Collections.singletonList(t);
+    }
+
+    private void albumMenu(Album a) {
+        new AlertDialog.Builder(this)
+                .setTitle(a.titleLine())
+                .setItems(new String[]{"play album", "add to queue", "open"}, (d, which) -> {
+                    if (which == 0) {
+                        PlaybackService.setTracksStatic(new ArrayList<>(a.tracks));
+                        startService(new Intent(this, PlaybackService.class)
+                                .setAction(PlaybackService.ACTION_PLAY)
+                                .putExtra(PlaybackService.EXTRA_POS, 0));
+                        showNowPlaying(a.tracks.get(0));
+                        showTab(true);
+                    } else if (which == 1) {
+                        PlaybackService.addToQueueStatic(new ArrayList<>(a.tracks));
+                        toast("queued " + a.tracks.size() + " tracks");
+                    } else {
+                        openAlbum(a);
+                    }
+                }).show();
+    }
+
+    private void trackMenu(Track t) {
+        new AlertDialog.Builder(this)
+                .setTitle(t.title.isEmpty() ? t.name : t.title)
+                .setItems(new String[]{"play now", "add to queue"}, (d, which) -> {
+                    if (which == 0) playTrack(t);
+                    else {
+                        List<Track> one = new ArrayList<>();
+                        one.add(t);
+                        PlaybackService.addToQueueStatic(one);
+                        toast("queued");
+                    }
+                }).show();
+    }
+
+    private void showQueue() {
+        synchronized (PlaybackService.class) {
+            // build a simple listing from the service's static tracks
+        }
+        final List<Track> q;
+        try {
+            q = new ArrayList<>(PlaybackService.peekQueue());
+        } catch (Exception e) {
+            toast("queue empty");
+            return;
+        }
+        String[] names = new String[q.size()];
+        for (int i = 0; i < q.size(); i++)
+            names[i] = q.get(i).title.isEmpty() ? q.get(i).name : q.get(i).title;
+        new AlertDialog.Builder(this)
+                .setTitle("queue (" + q.size() + ")")
+                .setItems(names, (d, which) -> {
+                    PlaybackService.setTracksStatic(q);
+                    startService(new Intent(this, PlaybackService.class)
+                            .setAction(PlaybackService.ACTION_PLAY)
+                            .putExtra(PlaybackService.EXTRA_POS, which));
+                    if (which < q.size()) showNowPlaying(q.get(which));
+                    showTab(true);
+                }).show();
+    }
+
+    private void toast(String s) {
+        Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
+    }
+
+    /* ---------------- player screen ---------------- */
+
     private void showNowPlaying(Track t) {
         pTrack.setText(t.title.isEmpty() ? t.name : t.title);
         pArtist.setText(t.artist);
         pAlbum.setText(t.album);
         pArt.setImageBitmap(t.art);
-        pTitle.setText("marimo");
+        pSeek.setWaveformSeed(hash(t.token));
     }
 
-    /* ---- track list adapter (bigger rows + cover thumbs) ---- */
+    private long hash(String s) {
+        long h = 1125899906842597L;
+        for (int i = 0; i < s.length(); i++) h = 31 * h + s.charAt(i);
+        return h;
+    }
 
-    private class TrackAdapter extends ArrayAdapter<Track> {
-        TrackAdapter() {
-            super(MainActivity.this, 0, tracks);
+    private void updatePlayerUi() {
+        boolean playing = PlaybackService.isPlaying();
+        pPlay.setText(playing ? "❚❚" : "|▶");
+        long pos = PlaybackService.position();
+        long dur = PlaybackService.duration();
+        if (dur > 0) {
+            pSeek.setMax((int) dur);
+            pSeek.setProgress((int) pos);
+            pTime.setText(fmt(pos) + " / " + fmt(dur));
         }
+    }
 
-        @Override
-        public View getView(int pos, View convert, ViewGroup parent) {
-            if (convert == null) {
-                convert = LayoutInflater.from(MainActivity.this)
-                        .inflate(R.layout.item_track, parent, false);
-            }
-            Track t = getItem(pos);
-            ((TextView) convert.findViewById(R.id.item_title))
-                    .setText(t.title.isEmpty() ? t.name : t.title);
-            ((TextView) convert.findViewById(R.id.item_artist))
-                    .setText(t.artist.isEmpty() ? t.name : t.artist);
-            ImageView art = convert.findViewById(R.id.item_art);
-            if (t.art != null) art.setImageBitmap(t.art);
-            else art.setImageResource(android.R.drawable.ic_media_play);
-            return convert;
-        }
+    private String fmt(long ms) {
+        long s = ms / 1000;
+        return (s / 60) + ":" + String.format("%02d", s % 60);
     }
 }

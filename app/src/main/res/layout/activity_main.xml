@@ -63,14 +63,59 @@
                 android:textSize="12sp"
                 android:textColor="#6b6b76" />
 
-            <ListView
-                android:id="@+id/tracklist"
+            <!-- folder menu row: up / folder name / queue -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:layout_marginTop="4dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <Button
+                    android:id="@+id/btn_up"
+                    android:layout_width="56dp"
+                    android:layout_height="36dp"
+                    android:text="⬆"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:id="@+id/folder_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:maxLines="1"
+                    android:ellipsize="middle"
+                    android:textSize="14sp"
+                    android:textColor="#c9c9d1" />
+
+                <Button
+                    android:id="@+id/btn_queue"
+                    android:layout_width="72dp"
+                    android:layout_height="36dp"
+                    android:text="queue"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:layout_marginTop="8dp"
-                android:divider="#2a2a30"
-                android:dividerHeight="1dp" />
+                android:orientation="horizontal">
+
+                <ListView
+                    android:id="@+id/tracklist"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:divider="#2a2a30"
+                    android:dividerHeight="1dp" />
+
+                <moe.umbrella.marimo.LetterBar
+                    android:id="@+id/letterbar"
+                    android:layout_width="28dp"
+                    android:layout_height="match_parent" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- player screen -->
@@ -80,7 +125,7 @@
             android:layout_height="match_parent"
             android:orientation="vertical"
             android:gravity="center_horizontal"
-            android:padding="24dp"
+            android:padding="20dp"
             android:visibility="gone">
 
             <TextView
@@ -98,7 +143,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:layout_marginTop="20dp"
+                android:layout_marginTop="16dp"
                 android:scaleType="fitCenter"
                 android:adjustViewBounds="true"
                 android:contentDescription="album art" />
@@ -107,7 +152,7 @@
                 android:id="@+id/p_track"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="12dp"
                 android:gravity="center"
                 android:textSize="18sp"
                 android:textColor="#e8ddd0"
@@ -129,10 +174,25 @@
                 android:textSize="13sp"
                 android:textColor="#6b6b76" />
 
+            <moe.umbrella.marimo.WaveformSeekBar
+                android:id="@+id/p_seek"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:layout_marginTop="14dp" />
+
+            <TextView
+                android:id="@+id/p_time"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="0:00 / 0:00"
+                android:textSize="12sp"
+                android:textColor="#6b6b76" />
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
+                android:layout_marginTop="10dp"
                 android:orientation="horizontal">
 
                 <Button

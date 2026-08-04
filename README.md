@@ -15,8 +15,8 @@ published.** the port strategy: keep the C core, rebuild the UI layer.
       handles only — no structs across the boundary.
 - [x] **App skeleton sketched** (`android/MainActivity.kt`): SAF tree picker,
       fd-based tag indexing, MediaSession callback, foreground service.
-- [ ] M1 — install toolchain (Android Studio / SDK + NDK)
-- [ ] M2 — JNI shim (`jni/marimo_core.c`) + on-device core selftest
+- [x] **M1 — toolchain** — SDK + NDK r29 installed (~/android-sdk), licenses accepted
+- [x] **M2 — on-device core selftest** — NDK-built x86_64 binary ran on waydroid: md5/queue/fs/tags all green, japanese-named flac parsed via bionic (fd + path variants)
 - [ ] M3 — SAF tree walk → fd tag index → C queue (the skeleton above, made
       real)
 - [ ] M4 — playback service: mpv-android (audio-only libmpv, `fd://` via

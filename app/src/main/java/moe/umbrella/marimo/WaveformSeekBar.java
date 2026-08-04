@@ -21,6 +21,7 @@ public class WaveformSeekBar extends View {
     private final Paint played = new Paint();
     private final Paint rest = new Paint();
     private final Paint line = new Paint();
+    private final Paint dot = new Paint();
     private int max = 1, progress = 0;
     private int dragProgress = -1;
     private long ignoreTicksUntil;
@@ -35,6 +36,7 @@ public class WaveformSeekBar extends View {
         played.setColor(0xFF7DFF7D);
         rest.setColor(0xFF2A2A30);
         line.setColor(0xFF6B6B76);
+        dot.setColor(0xFF7DFF7D);
         heights = new int[N_BARS];
         for (int i = 0; i < N_BARS; i++) heights[i] = 4;   /* silent baseline */
     }
@@ -76,8 +78,7 @@ public class WaveformSeekBar extends View {
         int playedX = (int) (w * frac);
         int mid = h / 2;
 
-        /* continuous filled waveform silhouette (no gaps — a real render
-         * look): amplitude envelope on top, mirrored on the bottom */
+        /* waveform silhouette: dark, full height (the envelope) */
         wavePath.reset();
         wavePath.moveTo(0, mid);
         float colW = w / (float) N_BARS;
@@ -95,9 +96,18 @@ public class WaveformSeekBar extends View {
         wavePath.close();
         canvas.drawPath(wavePath, rest);
 
-        /* played portion: flat green fill over the silhouette */
-        if (playedX > 0) canvas.drawRect(0, 0, playedX, h, played);
-        canvas.drawRect(playedX, 0, playedX + 2, h, line);
+        /* played portion: green fill CLIPPED to the waveform shape, so
+         * the fill follows the envelope instead of the full bar area */
+        if (playedX > 0) {
+            canvas.save();
+            canvas.clipPath(wavePath);
+            canvas.drawRect(0, 0, playedX, h, played);
+            canvas.restore();
+        }
+        /* actual seekbar: centre line + position dot */
+        canvas.drawLine(0, mid, w, mid, line);
+        canvas.drawCircle(playedX, mid, 7, dot);
+        canvas.drawCircle(playedX, mid, 3, played);
     }
 
     @Override

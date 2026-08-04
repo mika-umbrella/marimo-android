@@ -505,8 +505,8 @@ public class MainActivity extends Activity {
     private void updatePlayerUi() {
         boolean playing = PlaybackService.isPlaying();
         pPlay.setImageResource(playing
-                ? android.R.drawable.ic_media_pause
-                : android.R.drawable.ic_media_play);
+                ? R.drawable.ic_pause
+                : R.drawable.ic_play);
         ImageButton sh = findViewById(R.id.p_shuffle);
         ImageButton rp = findViewById(R.id.p_repeat);
         if (sh != null) sh.setAlpha(PlaybackService.shuffle() == 1 ? 1f : 0.3f);

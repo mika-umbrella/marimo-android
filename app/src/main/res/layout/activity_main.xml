@@ -211,7 +211,7 @@
                     android:layout_width="0dp"
                     android:layout_height="64dp"
                     android:layout_weight="1"
-                    android:src="@android:drawable/ic_media_previous"
+                    android:src="@drawable/ic_prev"
                     android:background="?android:attr/selectableItemBackground"
                     android:contentDescription="previous" />
 
@@ -220,7 +220,7 @@
                     android:layout_width="0dp"
                     android:layout_height="64dp"
                     android:layout_weight="1"
-                    android:src="@android:drawable/ic_media_play"
+                    android:src="@drawable/ic_play"
                     android:background="?android:attr/selectableItemBackground"
                     android:contentDescription="play/pause" />
 
@@ -229,7 +229,7 @@
                     android:layout_width="0dp"
                     android:layout_height="64dp"
                     android:layout_weight="1"
-                    android:src="@android:drawable/ic_media_next"
+                    android:src="@drawable/ic_next"
                     android:background="?android:attr/selectableItemBackground"
                     android:contentDescription="next" />
             </LinearLayout>

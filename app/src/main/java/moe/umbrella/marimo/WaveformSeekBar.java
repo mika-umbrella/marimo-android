@@ -46,6 +46,14 @@ public class WaveformSeekBar extends View {
         invalidate();
     }
 
+    /** use a real extracted waveform (peaks 0..100) instead of the PRNG */
+    public void setWaveformPeaks(int[] peaks) {
+        if (peaks == null) { setWaveformSeed(seed == 0 ? 1 : seed); return; }
+        for (int i = 0; i < N_BARS; i++)
+            heights[i] = peaks[Math.min(i, peaks.length - 1)];
+        invalidate();
+    }
+
     public void setMax(int m) { max = Math.max(m, 1); invalidate(); }
     public void setProgress(int p) {
         if (p < 0) p = 0;

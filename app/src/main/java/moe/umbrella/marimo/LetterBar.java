@@ -21,7 +21,7 @@ public class LetterBar extends View {
     public LetterBar(Context c, AttributeSet a) {
         super(c, a);
         text.setColor(0xFF6B6B76);
-        text.setTextSize(13f);
+        text.setTextSize(17f);
         text.setTextAlign(Paint.Align.CENTER);
         highlight.setColor(0xFF1E1E23);
     }

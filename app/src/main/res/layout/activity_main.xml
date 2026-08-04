@@ -219,6 +219,24 @@
                     android:text="▶|"
                     android:textSize="22sp" />
             </LinearLayout>
+
+            <Button
+                android:id="@+id/p_queue_toggle"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:layout_marginTop="8dp"
+                android:text="queue ▾"
+                android:textSize="13sp" />
+
+            <ListView
+                android:id="@+id/p_queue"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="4dp"
+                android:visibility="gone"
+                android:divider="#2a2a30"
+                android:dividerHeight="1dp" />
         </LinearLayout>
     </FrameLayout>
 

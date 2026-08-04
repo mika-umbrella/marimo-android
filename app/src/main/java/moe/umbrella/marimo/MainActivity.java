@@ -13,6 +13,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -42,7 +43,9 @@ public class MainActivity extends Activity {
     private TextView pTrack, pArtist, pAlbum, pTime;
     private ImageView pArt;
     private moe.umbrella.marimo.WaveformSeekBar pSeek;
-    private Button pPlay;
+    private Button pPlay, pQueueToggle;
+    private ListView pQueue;
+    private boolean queueVisible;
     private Uri treeUri;
     private Album openAlbum;         // null = root (albums), else its tracks
     private final Handler handler = new Handler();
@@ -98,6 +101,23 @@ public class MainActivity extends Activity {
         pArt = findViewById(R.id.p_art);
         pSeek = findViewById(R.id.p_seek);
         pPlay = findViewById(R.id.p_play);
+        pQueueToggle = findViewById(R.id.p_queue_toggle);
+        pQueue = findViewById(R.id.p_queue);
+        pQueueToggle.setOnClickListener(v -> {
+            queueVisible = !queueVisible;
+            pQueue.setVisibility(queueVisible ? View.VISIBLE : View.GONE);
+            pQueueToggle.setText(queueVisible ? "queue ▴" : "queue ▾");
+            if (queueVisible) refreshQueueList();
+        });
+        pQueue.setOnItemClickListener((p, v, pos, id) -> {
+            List<Track> q = PlaybackService.peekQueue();
+            if (pos < 0 || pos >= q.size()) return;
+            PlaybackService.setTracksStatic(q);
+            startService(new Intent(this, PlaybackService.class)
+                    .setAction(PlaybackService.ACTION_PLAY)
+                    .putExtra(PlaybackService.EXTRA_POS, pos));
+            showNowPlaying(q.get(pos));
+        });
 
         adapter = new AlbumAdapter(this, entries);
         ListView list = findViewById(R.id.tracklist);
@@ -416,7 +436,24 @@ public class MainActivity extends Activity {
         pArtist.setText(t.artist);
         pAlbum.setText(t.album);
         pArt.setImageBitmap(t.art);
-        pSeek.setWaveformSeed(hash(t.token));
+        /* real waveform (async decode), falls back to the PRNG skyline */
+        int[] peaks = WaveformExtractor.get(this, t.token);
+        if (peaks != null) pSeek.setWaveformPeaks(peaks);
+        else pSeek.setWaveformSeed(hash(t.token));
+        refreshQueueList();
+    }
+
+    private void refreshQueueList() {
+        List<Track> q = PlaybackService.peekQueue();
+        String[] lines = new String[q.size()];
+        for (int i = 0; i < q.size(); i++) {
+            Track t = q.get(i);
+            String title = t.title.isEmpty() ? t.name : t.title;
+            lines[i] = (i + 1) + ".  " + title
+                    + (t.artist.isEmpty() ? "" : "  —  " + t.artist);
+        }
+        pQueue.setAdapter(new ArrayAdapter<>(this,
+                android.R.layout.simple_list_item_1, lines));
     }
 
     private long hash(String s) {

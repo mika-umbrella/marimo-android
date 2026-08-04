@@ -106,7 +106,8 @@ public class WaveformSeekBar extends View {
         }
         /* actual seekbar: centre line + position dot */
         canvas.drawLine(0, mid, w, mid, line);
-        canvas.drawCircle(playedX, mid, 7, dot);
+        canvas.drawCircle(playedX, mid, 9, line);   /* grey halo */
+        canvas.drawCircle(playedX, mid, 6, dot);
         canvas.drawCircle(playedX, mid, 3, played);
     }
 

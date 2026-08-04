@@ -510,7 +510,12 @@ public class MainActivity extends Activity {
         ImageButton sh = findViewById(R.id.p_shuffle);
         ImageButton rp = findViewById(R.id.p_repeat);
         if (sh != null) sh.setAlpha(PlaybackService.shuffle() == 1 ? 1f : 0.3f);
-        if (rp != null) rp.setAlpha(PlaybackService.repeat() > 0 ? 1f : 0.3f);
+        if (rp != null) {
+            int rep = PlaybackService.repeat();
+            rp.setAlpha(rep > 0 ? 1f : 0.3f);
+            rp.setImageResource(rep == 2 ? R.drawable.ic_repeat_one
+                    : R.drawable.ic_repeat);
+        }
         long pos = PlaybackService.position();
         long dur = PlaybackService.duration();
         pTime.setText(dur > 0 ? fmt(pos) + " / " + fmt(dur)

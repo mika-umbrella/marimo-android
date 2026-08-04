@@ -170,6 +170,40 @@ Java_moe_umbrella_marimo_NativeBridge_tagReadFd(JNIEnv *env, jclass clazz,
     return fill_tags(env, &m, title, artist, album, dur, track, disc);
 }
 
+/* ---------------- embedded art ---------------- */
+
+JNIEXPORT jbyteArray JNICALL
+Java_moe_umbrella_marimo_NativeBridge_embeddedArtFd(JNIEnv *env, jclass clazz,
+                                                    jint fd)
+{
+    unsigned char *data;
+    size_t len;
+    jbyteArray arr;
+    if (tag_embedded_art_fd(fd, &data, &len, NULL, 0) != 0) return NULL;
+    arr = (*env)->NewByteArray(env, (jsize)len);
+    if (arr) (*env)->SetByteArrayRegion(env, arr, 0, (jsize)len, (jbyte *)data);
+    free(data);
+    return arr;
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_moe_umbrella_marimo_NativeBridge_embeddedArtPath(JNIEnv *env, jclass clazz,
+                                                      jstring path)
+{
+    const char *p = path ? (*env)->GetStringUTFChars(env, path, NULL) : NULL;
+    unsigned char *data;
+    size_t len;
+    jbyteArray arr = NULL;
+    if (!p) return NULL;
+    if (tag_embedded_art(p, &data, &len, NULL, 0) == 0) {
+        arr = (*env)->NewByteArray(env, (jsize)len);
+        if (arr) (*env)->SetByteArrayRegion(env, arr, 0, (jsize)len, (jbyte *)data);
+        free(data);
+    }
+    (*env)->ReleaseStringUTFChars(env, path, p);
+    return arr;
+}
+
 /* ---------------- queue (opaque handle) ---------------- */
 
 JNIEXPORT jlong JNICALL

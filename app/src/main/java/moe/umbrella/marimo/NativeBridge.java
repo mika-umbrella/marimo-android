@@ -17,6 +17,13 @@ public class NativeBridge {
     public static native int tagReadPath(String path, byte[] title, byte[] artist,
                                          byte[] album, int[] dur, int[] track, int[] disc);
 
+    /** Embedded cover art from an fd (SAF). Consumes the fd! Returns raw
+     *  image bytes (jpeg/png) or null. */
+    public static native byte[] embeddedArtFd(int fd);
+
+    /** Embedded cover art from a path (app-private storage). */
+    public static native byte[] embeddedArtPath(String path);
+
     /** Opaque C queue handle. */
     public static native long queueNew(int shuffle, int repeat);
     public static native int queueAdd(long q, String token, String name, long size);

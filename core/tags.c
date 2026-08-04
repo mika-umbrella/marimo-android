@@ -93,6 +93,163 @@ static void id3_text(const unsigned char *data, int dlen, char *out, int outsz)
     trim_space(out);
 }
 
+/* ---------------- embedded art ---------------- */
+
+/* FLAC METADATA_BLOCK_PICTURE (type 6): picture type(4), mime len+mime,
+ * desc len+desc, width/height/depth/colors (16), data len+data.
+ * returns 0 + malloc'd data on success. */
+static int flac_art(FILE *f, unsigned char **out, size_t *outlen,
+                    char *mime, size_t mimesz)
+{
+    unsigned char bh[4];
+    if (fread(bh, 1, 4, f) != 4 || memcmp(bh, "fLaC", 4)) return -1;
+    for (;;) {
+        unsigned char *buf;
+        int last, type, len;
+        if (fread(bh, 1, 4, f) != 4) return -1;
+        last = bh[0] & 0x80;
+        type = bh[0] & 0x7F;
+        len = get_u24be(bh + 1);
+        if (type != 6) {
+            if (fseek(f, len, SEEK_CUR)) return -1;
+        } else {
+            int off = 0, mlen, dlen;
+            buf = (unsigned char *)malloc(len);
+            if (!buf) return -1;
+            if (fread(buf, 1, len, f) != (size_t)len) { free(buf); return -1; }
+            if (len < 32) { free(buf); return -1; }
+            off = 4;                       /* picture type (skip) */
+            mlen = get_u32be(buf + off); off += 4;
+            if (off + mlen + 4 > len) { free(buf); return -1; }
+            if (mime && mimesz > 0) {
+                int cp = mlen < (int)mimesz - 1 ? mlen : (int)mimesz - 1;
+                memcpy(mime, buf + off, cp);
+                mime[cp] = 0;
+            }
+            off += mlen;
+            dlen = get_u32be(buf + off); off += 4;
+            if (off + dlen + 4 > len) { free(buf); return -1; }
+            off += dlen;                   /* description (skip) */
+            off += 16;                     /* w/h/depth/colors */
+            if (off + 4 > len) { free(buf); return -1; }
+            {
+                int dl = get_u32be(buf + off); off += 4;
+                if (off + dl > len) { free(buf); return -1; }
+                *out = (unsigned char *)malloc(dl);
+                if (!*out) { free(buf); return -1; }
+                memcpy(*out, buf + off, dl);
+                *outlen = dl;
+                free(buf);
+                return 0;
+            }
+        }
+        if (last) break;
+    }
+    return -1;
+}
+
+/* ID3v2.3/2.4 APIC frame: encoding(1), mime nul, pictype(1), desc nul, data */
+static int id3_art(const unsigned char *buf, int fsize,
+                   unsigned char **out, size_t *outlen, char *mime, size_t mimesz)
+{
+    int off = 1;                 /* text encoding */
+    int mlen = 0, dlen = 0;
+    while (off + 1 < fsize && buf[off + mlen]) mlen++;
+    if (off + mlen + 1 >= fsize) return -1;
+    if (mime && mimesz > 0) {
+        int cp = mlen < (int)mimesz - 1 ? mlen : (int)mimesz - 1;
+        memcpy(mime, buf + off, cp);
+        mime[cp] = 0;
+    }
+    off += mlen + 1 + 1;         /* + mime nul + picture type */
+    if (off >= fsize) return -1;
+    if (buf[0] == 1 || buf[0] == 2) {        /* utf-16: 2-byte nul */
+        while (off + 2 <= fsize && (buf[off] || buf[off + 1])) off += 2;
+        off += 2;
+    } else {                                  /* latin1 / utf8 */
+        while (off < fsize && buf[off]) off++;
+        off += 1;
+    }
+    dlen = fsize - off;
+    if (dlen <= 0 || off >= fsize) return -1;
+    *out = (unsigned char *)malloc(dlen);
+    if (!*out) return -1;
+    memcpy(*out, buf + off, dlen);
+    *outlen = dlen;
+    return 0;
+}
+
+/* public: embedded cover art from an fd (consumes it, android SAF style) */
+int tag_embedded_art_fd(int fd, unsigned char **out, size_t *outlen,
+                        char *mime, size_t mimesz)
+{
+    FILE *f = fdopen(fd, "rb");
+    unsigned char hdr[10];
+    int rc = -1;
+    *out = NULL;
+    *outlen = 0;
+    if (mime && mimesz) mime[0] = 0;
+    if (!f) { close(fd); return -1; }
+    if (fread(hdr, 1, 10, f) != 10) { fclose(f); return -1; }
+    if (!memcmp(hdr, "fLaC", 4)) {
+        rewind(f);
+        rc = flac_art(f, out, outlen, mime, mimesz);
+    } else if (!memcmp(hdr, "ID3", 3)) {
+        /* re-read whole tag: id3_parse already reads it; simplest is to
+         * walk frames here on the same buffer */
+        int ver = hdr[3];
+        int size = ((hdr[6] & 0x7F) << 21) | ((hdr[7] & 0x7F) << 14) |
+                   ((hdr[8] & 0x7F) << 7) | (hdr[9] & 0x7F);
+        unsigned char *buf;
+        int off = 0;             /* buf = tag body (header read above) */
+        if (size > 0 && size < 64 * 1024 * 1024) {
+            buf = (unsigned char *)malloc(size);
+            if (buf && fread(buf, 1, size, f) == (size_t)size) {
+                if ((hdr[5] & 0x40) && off + 4 <= size) {
+                    int eh = get_u32be(buf + off);
+                    off += 4 + eh;
+                }
+                while (off + (ver == 2 ? 6 : 10) <= size) {
+                    int idlen = ver == 2 ? 3 : 4;
+                    int fsize;
+                    const char *id = (const char *)buf + off;
+                    if (id[0] == 0) break;
+                    if (ver == 2) fsize = get_u24be(buf + off + 3);
+                    else {
+                        fsize = get_u32be(buf + off + 4);
+                        if (ver == 4) fsize &= 0x0FFFFFFF;
+                    }
+                    if (fsize < 0) fsize = 0;
+                    if (ver == 2) {
+                        if (!memcmp(id, "PIC", 3)) { /* v2.2 unsupported */
+                            rc = -1;
+                            break;
+                        }
+                    } else if (!memcmp(id, "APIC", 4)) {
+                        rc = id3_art(buf + off + 10, fsize, out, outlen, mime, mimesz);
+                        break;
+                    }
+                    off += idlen + (ver == 2 ? 3 : 6) + fsize;
+                }
+            }
+            free(buf);
+        }
+    }
+    fclose(f);
+    return rc;
+}
+
+int tag_embedded_art(const char *path, unsigned char **out, size_t *outlen,
+                     char *mime, size_t mimesz)
+{
+    FILE *f = fs_fopen(path, "rb");
+    int rc;
+    if (!f) return -1;
+    rc = tag_embedded_art_fd(dup(fileno(f)), out, outlen, mime, mimesz);
+    fclose(f);
+    return rc;
+}
+
 /* ---------------- FLAC ---------------- */
 
 static int flac_parse(FILE *f, Meta *meta, int *track, int *disc)

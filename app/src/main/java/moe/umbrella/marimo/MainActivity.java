@@ -2,32 +2,47 @@ package moe.umbrella.marimo;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 
 import androidx.documentfile.provider.DocumentFile;
 
 import java.io.File;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
 public class MainActivity extends Activity {
 
-    private final List<Track> tracks = new ArrayList<>();
-    private ArrayAdapter<String> adapter;
-    private TextView status, nowplaying;
-    private Uri treeUri;
-
     private static final int REQ_PICK_TREE = 7;
     private static final String PREFS = "marimo", KEY_TREE = "tree_uri";
+
+    private final List<Track> tracks = new ArrayList<>();
+    private TrackAdapter adapter;
+    private TextView status, nowplaying;
+    private LinearLayout screenLibrary, screenPlayer;
+    private TextView pTitle, pTrack, pArtist, pAlbum;
+    private ImageView pArt;
+    private Uri treeUri;
+
+    private static boolean isAudio(String name) {
+        String n = name.toLowerCase();
+        return n.endsWith(".flac") || n.endsWith(".mp3") || n.endsWith(".ogg")
+                || n.endsWith(".opus") || n.endsWith(".m4a") || n.endsWith(".wav")
+                || n.endsWith(".aac") || n.endsWith(".ape");
+    }
 
     private void grantTree(Uri uri) {
         treeUri = uri;
@@ -48,20 +63,7 @@ public class MainActivity extends Activity {
         }
         grantTree(uri);
         status.setText("scanning " + uri + " …");
-        new Thread(() -> {
-            scanTree(DocumentFile.fromTreeUri(this, uri));
-            runOnUiThread(() -> {
-                refreshList();
-                status.setText(tracks.size() + " tracks indexed");
-            });
-        }).start();
-    }
-
-    private static boolean isAudio(String name) {
-        String n = name.toLowerCase();
-        return n.endsWith(".flac") || n.endsWith(".mp3") || n.endsWith(".ogg")
-                || n.endsWith(".opus") || n.endsWith(".m4a") || n.endsWith(".wav")
-                || n.endsWith(".aac") || n.endsWith(".ape");
+        rescan();
     }
 
     @Override
@@ -70,8 +72,54 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         status = findViewById(R.id.status);
-        nowplaying = findViewById(R.id.nowplaying);
-        adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1);
+        screenLibrary = findViewById(R.id.screen_library);
+        screenPlayer = findViewById(R.id.screen_player);
+        pTitle = findViewById(R.id.p_title);
+        pTrack = findViewById(R.id.p_track);
+        pArtist = findViewById(R.id.p_artist);
+        pAlbum = findViewById(R.id.p_album);
+        pArt = findViewById(R.id.p_art);
+
+        adapter = new TrackAdapter();
+        ListView list = findViewById(R.id.tracklist);
+        list.setAdapter(adapter);
+        list.setOnItemClickListener((p, v, pos, id) -> {
+            if (pos < 0 || pos >= tracks.size()) return;
+            Track t = tracks.get(pos);
+            PlaybackService.setTracksStatic(tracks);
+            startService(new Intent(this, PlaybackService.class)
+                    .setAction(PlaybackService.ACTION_PLAY)
+                    .putExtra(PlaybackService.EXTRA_POS, pos));
+            showNowPlaying(t);
+            showTab(true);           /* jump to the player screen */
+        });
+
+        findViewById(R.id.btn_pick).setOnClickListener(v -> {
+            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            startActivityForResult(i, REQ_PICK_TREE);
+        });
+        findViewById(R.id.btn_scan).setOnClickListener(v -> rescan());
+        findViewById(R.id.btn_test).setOnClickListener(v ->
+                new Thread(() -> {
+                    String out = NativeBridge.runSelftest(
+                            new File(getFilesDir(), "music").getPath());
+                    runOnUiThread(() -> status.setText(out));
+                }).start());
+
+        /* player screen controls */
+        findViewById(R.id.p_play).setOnClickListener(v ->
+                startService(new Intent(this, PlaybackService.class)
+                        .setAction(PlaybackService.ACTION_PLAY)));
+        findViewById(R.id.p_prev).setOnClickListener(v ->
+                startService(new Intent(this, PlaybackService.class)
+                        .setAction(PlaybackService.ACTION_PREV)));
+        findViewById(R.id.p_next).setOnClickListener(v ->
+                startService(new Intent(this, PlaybackService.class)
+                        .setAction(PlaybackService.ACTION_NEXT)));
+
+        /* bottom tabs */
+        findViewById(R.id.tab_library).setOnClickListener(v -> showTab(false));
+        findViewById(R.id.tab_player).setOnClickListener(v -> showTab(true));
 
         String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_TREE, null);
         if (saved != null) {
@@ -83,61 +131,27 @@ public class MainActivity extends Activity {
             } catch (SecurityException ignored) {
             }
         }
-        ListView list = findViewById(R.id.tracklist);
-        list.setAdapter(adapter);
-        list.setOnItemClickListener((p, v, pos, id) -> {
-            if (pos >= 0 && pos < tracks.size()) {
-                PlaybackService.setTracksStatic(tracks);
-                Intent i = new Intent(this, PlaybackService.class)
-                        .setAction(PlaybackService.ACTION_PLAY)
-                        .putExtra(PlaybackService.EXTRA_POS, pos);
-                startService(i);
-                nowplaying.setText(tracks.get(pos).display());
-            }
-        });
 
-        findViewById(R.id.btn_pick).setOnClickListener(v -> {
-            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-            startActivityForResult(i, REQ_PICK_TREE);
-        });
-        findViewById(R.id.btn_scan).setOnClickListener(v -> {
-            tracks.clear();
-            new Thread(() -> {
-                scanAppDirInto(tracks);
-                if (treeUri != null) scanTree(DocumentFile.fromTreeUri(this, treeUri));
-                runOnUiThread(() -> {
-                    refreshList();
-                    status.setText(tracks.size() + " tracks indexed");
-                });
-            }).start();
-        });
-        findViewById(R.id.btn_play).setOnClickListener(v -> {
-            Intent i = new Intent(this, PlaybackService.class)
-                    .setAction(PlaybackService.ACTION_PLAY);
-            startService(i);
-        });
-        findViewById(R.id.btn_prev).setOnClickListener(v ->
-                startService(new Intent(this, PlaybackService.class)
-                        .setAction(PlaybackService.ACTION_PREV)));
-        findViewById(R.id.btn_next).setOnClickListener(v ->
-                startService(new Intent(this, PlaybackService.class)
-                        .setAction(PlaybackService.ACTION_NEXT)));
-        findViewById(R.id.btn_test).setOnClickListener(v ->
-                new Thread(() -> {
-                    String out = NativeBridge.runSelftest(new File(getFilesDir(), "music").getPath());
-                    runOnUiThread(() -> status.setText(out));
-                }).start());
+        rescan();
+    }
 
+    private void showTab(boolean player) {
+        screenLibrary.setVisibility(player ? View.GONE : View.VISIBLE);
+        screenPlayer.setVisibility(player ? View.VISIBLE : View.GONE);
+    }
+
+    private void rescan() {
+        tracks.clear();
         new Thread(() -> {
             scanAppDirInto(tracks);
+            if (treeUri != null) scanTree(DocumentFile.fromTreeUri(this, treeUri));
             runOnUiThread(() -> {
-                refreshList();
-                status.setText(tracks.size() + " tracks in app music dir");
+                adapter.notifyDataSetChanged();
+                status.setText(tracks.size() + " tracks indexed");
             });
         }).start();
     }
 
-    /** Scan app-private music dir (adb-pushable; no permissions needed). */
     private void scanAppDirInto(List<Track> into) {
         File dir = new File(getFilesDir(), "music");
         dir.mkdirs();
@@ -189,14 +203,65 @@ public class MainActivity extends Activity {
                 t.track = tr[0];
                 t.disc = dc[0];
             }
+            t.art = loadArt(t.token);
         } catch (Exception e) {
             android.util.Log.e("marimo", "readTags failed: " + t.token, e);
         }
     }
 
-    private void refreshList() {
-        adapter.clear();
-        for (Track t : tracks) adapter.add(t.display());
-        adapter.notifyDataSetChanged();
+    /** Embedded cover art via the C core (new!). */
+    private Bitmap loadArt(String token) {
+        try {
+            byte[] raw;
+            if (token.startsWith("content://")) {
+                ParcelFileDescriptor pfd =
+                        getContentResolver().openFileDescriptor(Uri.parse(token), "r");
+                if (pfd == null) return null;
+                try {
+                    raw = NativeBridge.embeddedArtFd(pfd.detachFd());
+                } finally {
+                    pfd.close();
+                }
+            } else {
+                raw = NativeBridge.embeddedArtPath(token);
+            }
+            if (raw == null || raw.length == 0) return null;
+            return BitmapFactory.decodeByteArray(raw, 0, raw.length);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void showNowPlaying(Track t) {
+        pTrack.setText(t.title.isEmpty() ? t.name : t.title);
+        pArtist.setText(t.artist);
+        pAlbum.setText(t.album);
+        pArt.setImageBitmap(t.art);
+        pTitle.setText("marimo");
+    }
+
+    /* ---- track list adapter (bigger rows + cover thumbs) ---- */
+
+    private class TrackAdapter extends ArrayAdapter<Track> {
+        TrackAdapter() {
+            super(MainActivity.this, 0, tracks);
+        }
+
+        @Override
+        public View getView(int pos, View convert, ViewGroup parent) {
+            if (convert == null) {
+                convert = LayoutInflater.from(MainActivity.this)
+                        .inflate(R.layout.item_track, parent, false);
+            }
+            Track t = getItem(pos);
+            ((TextView) convert.findViewById(R.id.item_title))
+                    .setText(t.title.isEmpty() ? t.name : t.title);
+            ((TextView) convert.findViewById(R.id.item_artist))
+                    .setText(t.artist.isEmpty() ? t.name : t.artist);
+            ImageView art = convert.findViewById(R.id.item_art);
+            if (t.art != null) art.setImageBitmap(t.art);
+            else art.setImageResource(android.R.drawable.ic_media_play);
+            return convert;
+        }
     }
 }

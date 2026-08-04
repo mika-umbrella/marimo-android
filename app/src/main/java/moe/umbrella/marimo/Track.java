@@ -1,5 +1,7 @@
 package moe.umbrella.marimo;
 
+import android.graphics.Bitmap;
+
 /** One playable track: a path or content URI + tags from the C core. */
 public class Track {
     public final String token;   // absolute path or content:// URI
@@ -10,6 +12,7 @@ public class Track {
     public int durationMs;
     public int track;
     public int disc;
+    public Bitmap art;           // embedded cover from the C core
 
     public Track(String token, String name) {
         this.token = token;

@@ -15,4 +15,12 @@ int tag_trackinfo(const char *path, int *track, int *disc);
 int tag_read_meta_fd(int fd, Meta *meta);
 int tag_trackinfo_fd(int fd, int *track, int *disc);
 
+/* embedded cover art (FLAC METADATA_BLOCK_PICTURE / ID3 APIC).
+ * returns 0 + malloc'd raw image bytes (caller frees). fd variant
+ * consumes the fd; mime (e.g. "image/jpeg") may be NULL. */
+int tag_embedded_art_fd(int fd, unsigned char **out, size_t *outlen,
+                        char *mime, size_t mimesz);
+int tag_embedded_art(const char *path, unsigned char **out, size_t *outlen,
+                     char *mime, size_t mimesz);
+
 #endif

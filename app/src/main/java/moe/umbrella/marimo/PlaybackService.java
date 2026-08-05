@@ -312,6 +312,13 @@ public class PlaybackService extends MediaSessionService {
         return s != null && s.player != null ? s.player.getCurrentMediaItemIndex() : -1;
     }
 
+    /** the currently-playing Track (null if none) — for the UI to follow
+     *  auto-advance across the queue. */
+    public static Track current() {
+        PlaybackService s = instance;
+        return s != null ? s.currentTrack() : null;
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();

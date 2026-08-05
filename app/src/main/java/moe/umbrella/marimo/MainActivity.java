@@ -76,7 +76,8 @@ public class MainActivity extends Activity {
     private ImageButton pPlay;
     private ListView qList;
     private int dragFrom = -1;
-    private int tab = 0;   /* 0 library, 1 player, 2 queue */
+    private int tab = 0;
+    private String shownToken = "";   /* 0 library, 1 player, 2 queue */
     private Uri treeUri;
     private Album openAlbum;         // null = root (albums), else its tracks
     private final Handler handler = new Handler();
@@ -896,6 +897,7 @@ public class MainActivity extends Activity {
     /* ---------------- player screen ---------------- */
 
     private void showNowPlaying(Track t) {
+        shownToken = t.token;
         pTrack.setText(t.title.isEmpty() ? t.name : t.title);
         pArtist.setText(t.artist);
         pAlbum.setText(t.album);
@@ -924,6 +926,14 @@ public class MainActivity extends Activity {
     }
 
     private void updatePlayerUi() {
+        /* follow auto-advance: when the playing item changes (gapless next),
+         * refresh the title/art/waveform — showNowPlaying is not otherwise
+         * called on automatic transitions, only on manual taps. */
+        Track cur = PlaybackService.current();
+        if (cur != null && !shownToken.equals(cur.token)) {
+            shownToken = cur.token;
+            showNowPlaying(cur);
+        }
         boolean playing = PlaybackService.isPlaying();
         pPlay.setImageResource(playing
                 ? R.drawable.ic_pause

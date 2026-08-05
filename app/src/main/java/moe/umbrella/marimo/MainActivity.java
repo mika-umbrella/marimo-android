@@ -24,6 +24,7 @@ import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -664,18 +665,43 @@ public class MainActivity extends Activity {
             if (treeUri != null) scanTreeCollect(
                     DocumentFile.fromTreeUri(this, treeUri), found, dirs);
 
+            final int totalTracks = totalTracksOf(found);
+            runOnUiThread(() -> {
+                ProgressBar bar = findViewById(R.id.scan_progress);
+                if (bar != null) {
+                    bar.setMax(totalTracks);
+                    bar.setProgress(0);
+                    bar.setVisibility(View.VISIBLE);
+                }
+            });
+
             /* the slow part (tag + full-art reads) is independent per track:
              * run it across a thread pool so multi-core tablets scan faster */
             ExecutorService pool = Executors.newFixedThreadPool(
                     Math.max(2, Runtime.getRuntime().availableProcessors()));
             List<Future<?>> futs = new ArrayList<>();
+            java.util.concurrent.atomic.AtomicInteger done =
+                    new java.util.concurrent.atomic.AtomicInteger();
             for (Album a : found)
                 for (Track t : a.tracks)
-                    futs.add(pool.submit(() ->
-                            readTags(t, dirs.get(t))));
+                    futs.add(pool.submit(() -> {
+                        readTags(t, dirs.get(t));
+                        int d = done.incrementAndGet();
+                        if (d % 8 == 0 || d == totalTracks) {
+                            final int dd = d;
+                            runOnUiThread(() -> {
+                                ProgressBar bar = findViewById(R.id.scan_progress);
+                                if (bar != null) bar.setProgress(dd);
+                            });
+                        }
+                    }));
             for (Future<?> f : futs)
                 try { f.get(); } catch (Exception ignore) { }
             pool.shutdown();
+            runOnUiThread(() -> {
+                ProgressBar bar = findViewById(R.id.scan_progress);
+                if (bar != null) bar.setVisibility(View.GONE);
+            });
 
             for (Album a : found) {
                 int first = -1;
@@ -695,6 +721,12 @@ public class MainActivity extends Activity {
                         + totalTracks() + " tracks");
             });
         }).start();
+    }
+
+    private int totalTracksOf(List<Album> list) {
+        int n = 0;
+        for (Album a : list) n += a.tracks.size();
+        return n;
     }
 
     /** order album tracks by (disc, trackNo); fall back to the leading

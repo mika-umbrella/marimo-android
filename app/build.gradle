@@ -14,9 +14,30 @@ android {
         versionName "0.1"
     }
 
+    signingConfigs {
+        release {
+            def kh = System.getenv("MARIMO_KEYSTORE")
+            if (kh) {
+                storeFile file(kh)
+                storePassword System.getenv("MARIMO_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("MARIMO_KEY_ALIAS")
+                keyPassword System.getenv("MARIMO_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            // signed with the marimo release keystore (local, outside the repo).
+            // set MARIMO_KEYSTORE / *_PASSWORD / MARIMO_KEY_ALIAS when building.
+            def kh = System.getenv("MARIMO_KEYSTORE")
+            def sp = System.getenv("MARIMO_KEYSTORE_PASSWORD")
+            def kp = System.getenv("MARIMO_KEY_PASSWORD")
+            def al = System.getenv("MARIMO_KEY_ALIAS")
+            if (kh && sp && kp && al) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 

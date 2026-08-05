@@ -107,6 +107,63 @@ public class Scrobbler {
         post(LF_API, p, true);
     }
 
+    /* ---------------- last.fm interactive login ---------------- */
+
+    /** step 1: request a fresh auth token (no signature needed) */
+    public static String requestToken() {
+        try {
+            Map<String, String> p = new LinkedHashMap<>();
+            p.put("method", "auth.gettoken");
+            p.put("api_key", lfKey);
+            String body = bodyFor(p) + "&format=json";
+            HttpURLConnection c = open(LF_API, body);
+            int code = c.getResponseCode();
+            String resp = readBody(c, code);
+            c.disconnect();
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("\"token\":\"([^\"]+)\"").matcher(resp);
+            return code == 200 && m.find() ? m.group(1) : null;
+        } catch (Exception e) {
+            Log.e("marimo", "lf token failed: " + e);
+            return null;
+        }
+    }
+
+    /** step 2: the browser page the user logs in + approves on */
+    public static String authUrl(String token) {
+        return "https://www.last.fm/api/auth/?api_key=" + lfKey
+                + "&token=" + token;
+    }
+
+    /** step 3: once approved, exchange the token for a real session key.
+     *  sets the configured session/user and returns them (or null). */
+    public static String[] finishAuth(String token) {
+        try {
+            Map<String, String> p = new LinkedHashMap<>();
+            p.put("method", "auth.getsession");
+            p.put("api_key", lfKey);
+            p.put("token", token);
+            p.put("api_sig", apiSig(p));
+            String body = bodyFor(p) + "&format=json";
+            HttpURLConnection c = open(LF_API, body);
+            int code = c.getResponseCode();
+            String resp = readBody(c, code);
+            c.disconnect();
+            if (code != 200) return null;
+            java.util.regex.Matcher mk = java.util.regex.Pattern
+                    .compile("\"key\":\"([^\"]+)\"").matcher(resp);
+            java.util.regex.Matcher mn = java.util.regex.Pattern
+                    .compile("\"name\":\"([^\"]+)\"").matcher(resp);
+            if (!mk.find() || !mn.find()) return null;
+            lfSession = mk.group(1);
+            lfUser = mn.group(1);
+            return new String[]{lfUser, lfSession};
+        } catch (Exception e) {
+            Log.e("marimo", "lf session failed: " + e);
+            return null;
+        }
+    }
+
     /* ---------------- listenbrainz ---------------- */
 
     private static void lbNowPlaying(Track t) {
@@ -164,6 +221,33 @@ public class Scrobbler {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    /** url-encoded form body from a param map */
+    private static String bodyFor(Map<String, String> params) throws Exception {
+        StringBuilder body = new StringBuilder();
+        for (Map.Entry<String, String> e : params.entrySet()) {
+            if (body.length() > 0) body.append('&');
+            body.append(URLEncoder.encode(e.getKey(), "UTF-8"))
+                    .append('=')
+                    .append(URLEncoder.encode(e.getValue() == null ? "" : e.getValue(), "UTF-8"));
+        }
+        return body.toString();
+    }
+
+    /** open a form-encoded POST connection (used by the auth flow) */
+    private static HttpURLConnection open(String url, String formBody) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setRequestMethod("POST");
+        c.setDoOutput(true);
+        c.setConnectTimeout(6000);
+        c.setReadTimeout(12000);
+        c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+        c.setRequestProperty("User-Agent", "marimo-android/0.1");
+        try (OutputStream os = c.getOutputStream()) {
+            os.write(formBody.getBytes(StandardCharsets.UTF_8));
+        }
+        return c;
     }
 
     private static void post(String url, Map<String, String> params, boolean lfSigned) {

@@ -234,6 +234,14 @@
                     android:textColor="#7dff7d" />
             </LinearLayout>
 
+            <Button
+                android:id="@+id/btn_lf_login"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="18dp"
+                android:text="log in with last.fm"
+                android:textSize="15sp" />
+
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

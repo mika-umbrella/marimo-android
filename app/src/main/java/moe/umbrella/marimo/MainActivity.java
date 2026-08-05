@@ -242,6 +242,7 @@ public class MainActivity extends Activity {
         findViewById(R.id.eye_lf_session).setOnClickListener(v -> toggleMask(etLfSession, findViewById(R.id.eye_lf_session)));
         findViewById(R.id.eye_lb_token).setOnClickListener(v -> toggleMask(etLbToken, findViewById(R.id.eye_lb_token)));
         findViewById(R.id.btn_scrobble_save).setOnClickListener(v -> saveScrobble());
+        findViewById(R.id.btn_lf_login).setOnClickListener(v -> loginLastFm());
         findViewById(R.id.set_theme).setOnClickListener(v -> {
             Theme.dark = !Theme.dark;
             prefs.edit().putBoolean("dark", Theme.dark).apply();
@@ -355,6 +356,8 @@ public class MainActivity extends Activity {
         Ui.panel(findViewById(R.id.btn_settings_q));
         Ui.panel(findViewById(R.id.btn_scrobble_back));
         Ui.panel(findViewById(R.id.btn_scrobble_save));
+        Ui.panel(findViewById(R.id.btn_lf_login));
+        Ui.text(findViewById(R.id.btn_lf_login), 0);
         Ui.tint(findViewById(R.id.btn_settings_q), 0);
         Ui.tint(findViewById(R.id.eye_lf_key), 0);
         Ui.tint(findViewById(R.id.eye_lf_session), 0);
@@ -542,6 +545,56 @@ public class MainActivity extends Activity {
         etLfKey.setText(cur[0]);
         etLfSession.setText(cur[2]);
         etLbToken.setText(cur[4]);
+    }
+
+    /** interactive last.fm login: token -> browser -> poll getSession.
+     *  needs the api key set; the session key is fetched automatically. */
+    private void loginLastFm() {
+        String key = etLfKey.getText().toString().trim();
+        if (key.isEmpty()) key = Scrobbler.current()[0];   /* seeded/configured key */
+        if (key.isEmpty() || Scrobbler.current()[1].isEmpty()) {
+            toast("enter your last.fm api key + secret first");
+            return;
+        }
+        final android.widget.Button btn = findViewById(R.id.btn_lf_login);
+        btn.setEnabled(false);
+        btn.setText("opening last.fm…");
+        new Thread(() -> {
+            final String token = Scrobbler.requestToken();
+            if (token == null) {
+                runOnUiThread(() -> { toast("couldn't reach last.fm"); btn.setEnabled(true); btn.setText("log in with last.fm"); });
+                return;
+            }
+            runOnUiThread(() -> {
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW,
+                            Uri.parse(Scrobbler.authUrl(token))));
+                } catch (Exception e) { }
+                btn.setText("approve it in the browser…");
+            });
+            /* last.fm gives no callback URL, so poll getSession until the
+             * user approves (token becomes authorized), ~90s cap */
+            for (int i = 0; i < 45; i++) {
+                try { Thread.sleep(2000); } catch (InterruptedException e) { break; }
+                final String[] s = Scrobbler.finishAuth(token);
+                if (s != null) {
+                    final String user = s[0];
+                    runOnUiThread(() -> {
+                        etLfSession.setText(Scrobbler.current()[2]);
+                        saveScrobble();
+                        btn.setEnabled(true);
+                        btn.setText("linked to last.fm as " + user + " ✓");
+                        toast("linked to last.fm as " + user);
+                    });
+                    return;
+                }
+            }
+            runOnUiThread(() -> {
+                btn.setEnabled(true);
+                btn.setText("log in with last.fm");
+                toast("login timed out — try again");
+            });
+        }).start();
     }
 
     private void saveScrobble() {

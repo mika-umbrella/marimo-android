@@ -976,17 +976,16 @@ public class MainActivity extends Activity {
         return false;
     }
 
-    /** read cover.jpg/folder.jpg/front.jpg from the audio file's folder —
-     *  used when a track has no embedded art. folder covers inside the picked
-     *  SAF tree are read via ContentResolver, so no image permission is needed. */
+    /** read cover/folder/front art from the audio file's folder, matching
+     *  filenames CASE-INSENSITIVELY (Folder.jpg, COVER.JPEG, ...) and a few
+     *  image extensions. used when a track has no embedded art. folder covers
+     *  inside the picked SAF tree are read via ContentResolver. */
     private byte[] treeFolderCover(DocumentFile dir) {
         try {
             if (dir == null) return null;
-            String[] names = {"cover.jpg", "folder.jpg", "front.jpg",
-                              "cover.png", "folder.png", "front.png"};
-            for (String n : names) {
-                DocumentFile c = dir.findFile(n);
-                if (c != null && c.exists() && c.isFile()) {
+            for (DocumentFile c : dir.listFiles()) {
+                String n = c.getName();
+                if (n != null && isFolderCoverName(n)) {
                     java.io.InputStream in = getContentResolver()
                             .openInputStream(c.getUri());
                     return readAll(in);
@@ -996,28 +995,44 @@ public class MainActivity extends Activity {
         return null;
     }
 
+    /** is this filename a folder-cover candidate, case-insensitively?
+     *  stem in {cover, folder, front} and an image extension. */
+    private static boolean isFolderCoverName(String name) {
+        int dot = name.lastIndexOf('.');
+        if (dot <= 0) return false;
+        String stem = name.substring(0, dot).toLowerCase();
+        String ext = name.substring(dot + 1).toLowerCase();
+        boolean goodExt = ext.equals("jpg") || ext.equals("jpeg")
+                || ext.equals("png") || ext.equals("bmp") || ext.equals("webp");
+        return goodExt && (stem.equals("cover") || stem.equals("folder")
+                || stem.equals("front"));
+    }
+
     /** read cover.jpg/... from an app-private folder (needs no permission). */
     private byte[] folderCoverPath(String audioPath) {
         try {
             java.io.File dir = new java.io.File(audioPath).getParentFile();
             if (dir == null) return null;
-            String[] names = {"cover.jpg", "folder.jpg", "front.jpg",
-                              "cover.png", "folder.png", "front.png"};
-            for (String n : names) {
-                java.io.File c = new java.io.File(dir, n);
-                if (c.exists() && c.isFile()) {
-                    java.io.FileInputStream in = new java.io.FileInputStream(c);
-                    byte[] b = new byte[(int) c.length()];
-                    int off = 0;
-                    while (off < b.length) {
-                        int r = in.read(b, off, b.length - off);
-                        if (r < 0) break;
-                        off += r;
-                    }
-                    in.close();
-                    if (off == b.length) return b;
+            java.io.File[] files = dir.listFiles();
+            if (files == null) return null;
+            String match = null;
+            for (File c : files)
+                if (c.isFile() && isFolderCoverName(c.getName())) {
+                    match = c.getAbsolutePath();
+                    break;
                 }
+            if (match == null) return null;
+            java.io.FileInputStream in = new java.io.FileInputStream(match);
+            java.io.File c = new java.io.File(match);
+            byte[] b = new byte[(int) c.length()];
+            int off = 0;
+            while (off < b.length) {
+                int r = in.read(b, off, b.length - off);
+                if (r < 0) break;
+                off += r;
             }
+            in.close();
+            if (off == b.length) return b;
         } catch (Exception e) { }
         return null;
     }

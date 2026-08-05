@@ -35,6 +35,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.HashMap;
 
 public class MainActivity extends Activity {
 
@@ -633,8 +637,34 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             albums.clear();
             openAlbum = null;
-            scanAppDirInto(null);
-            if (treeUri != null) scanTree(DocumentFile.fromTreeUri(this, treeUri));
+            List<Album> found = new ArrayList<>();
+            HashMap<Track, DocumentFile> dirs = new HashMap<>();
+
+            scanAppDirCollect(found);
+            if (treeUri != null) scanTreeCollect(
+                    DocumentFile.fromTreeUri(this, treeUri), found, dirs);
+
+            /* the slow part (tag + full-art reads) is independent per track:
+             * run it across a thread pool so multi-core tablets scan faster */
+            ExecutorService pool = Executors.newFixedThreadPool(
+                    Math.max(2, Runtime.getRuntime().availableProcessors()));
+            List<Future<?>> futs = new ArrayList<>();
+            for (Album a : found)
+                for (Track t : a.tracks)
+                    futs.add(pool.submit(() ->
+                            readTags(t, dirs.get(t))));
+            for (Future<?> f : futs)
+                try { f.get(); } catch (Exception ignore) { }
+            pool.shutdown();
+
+            for (Album a : found) {
+                int first = -1;
+                for (int i = 0; i < a.tracks.size(); i++)
+                    if (a.tracks.get(i).art != null) { first = i; break; }
+                a.coverIdx = first;
+                sortAlbumTracks(a);
+                if (!a.tracks.isEmpty()) addAlbum(a);
+            }
             Collections.sort(albums, (a, b) ->
                     a.folder.compareToIgnoreCase(b.folder));
             runOnUiThread(() -> {
@@ -695,7 +725,7 @@ public class MainActivity extends Activity {
 
     /* ---------------- scanning ---------------- */
 
-    private void scanAppDirInto(Void unused) {
+    private void scanAppDirCollect(List<Album> found) {
         File dir = new File(getFilesDir(), "music");
         dir.mkdirs();
         File[] files = dir.listFiles();
@@ -708,43 +738,36 @@ public class MainActivity extends Activity {
                     for (File t : ts)
                         if (t.isFile() && isAudio(t.getName())) {
                             Track tr = new Track(t.getAbsolutePath(), t.getName());
-                            readTags(tr, null);
-                            if (a.coverIdx < 0 && tr.art != null) a.coverIdx = a.tracks.size();
                             a.tracks.add(tr);
                         }
-                sortAlbumTracks(a);
-                if (!a.tracks.isEmpty()) addAlbum(a);
+                if (!a.tracks.isEmpty()) found.add(a);
             } else if (f.isFile() && isAudio(f.getName())) {
                 Album loose = new Album("(loose files)");
                 Track tr = new Track(f.getAbsolutePath(), f.getName());
-                readTags(tr, null);
-                if (loose.coverIdx < 0 && tr.art != null) loose.coverIdx = 0;
                 loose.tracks.add(tr);
-                addAlbum(loose);
+                found.add(loose);
             }
         }
     }
 
-    private void scanTree(DocumentFile dir) {
+    private void scanTreeCollect(DocumentFile dir, List<Album> found,
+                                 HashMap<Track, DocumentFile> dirs) {
         for (DocumentFile f : dir.listFiles()) {
             if (f.isDirectory()) {
                 Album a = new Album(f.getName());
                 for (DocumentFile t : f.listFiles())
                     if (t.isFile() && isAudio(t.getName())) {
                         Track tr = new Track(t.getUri().toString(), t.getName());
-                        readTags(tr, f);
-                        if (a.coverIdx < 0 && tr.art != null) a.coverIdx = a.tracks.size();
+                        dirs.put(tr, f);
                         a.tracks.add(tr);
                     }
-                sortAlbumTracks(a);
-                if (!a.tracks.isEmpty()) addAlbum(a);
+                if (!a.tracks.isEmpty()) found.add(a);
             } else if (f.isFile() && isAudio(f.getName())) {
                 Album loose = new Album("(loose files)");
                 Track tr = new Track(f.getUri().toString(), f.getName());
-                readTags(tr, dir);
-                if (loose.coverIdx < 0 && tr.art != null) loose.coverIdx = 0;
+                dirs.put(tr, dir);
                 loose.tracks.add(tr);
-                addAlbum(loose);
+                found.add(loose);
             }
         }
     }
@@ -861,10 +884,29 @@ public class MainActivity extends Activity {
                 if (raw == null) raw = folderCoverPath(token);
             }
             if (raw == null || raw.length == 0) return null;
-            return BitmapFactory.decodeByteArray(raw, 0, raw.length);
+            return decodeScaled(raw, 1024);
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** decode a cover image, downscaling so huge 1000+px album art doesn't
+     *  get fully decoded just to be shown at 48dp — the dominant scan cost. */
+    private static Bitmap decodeScaled(byte[] raw, int maxDim) {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(raw, 0, raw.length, bounds);
+        int sample = 1;
+        /* keep 2x the target so fitCenter on the player stays crisp */
+        int cap = Math.max(maxDim, 32);
+        while (bounds.outWidth / (sample * 2) > cap
+                && bounds.outHeight / (sample * 2) > cap
+                && sample < 64) {
+            sample *= 2;
+        }
+        BitmapFactory.Options opt = new BitmapFactory.Options();
+        opt.inSampleSize = sample;
+        return BitmapFactory.decodeByteArray(raw, 0, raw.length, opt);
     }
 
     /* ---------------- playback ---------------- */

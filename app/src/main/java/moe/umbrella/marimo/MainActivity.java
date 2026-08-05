@@ -283,6 +283,14 @@ public class MainActivity extends Activity {
         PlaybackService.attachQueueStorage(
                 new File(getFilesDir(), "queue.dat"));
         handler.post(uiTick);
+        /* queue.dat only persists text tags — load the restored tracks'
+         * album art (by path) so the queue shows covers. async + non-blocking. */
+        new Thread(() -> {
+            List<Track> q = PlaybackService.peekQueue();
+            for (Track t : q)
+                if (t.art == null) t.art = loadArt(t.token);
+            runOnUiThread(this::refreshQueueList);
+        }).start();
     }
 
     private Bitmap currentArt;

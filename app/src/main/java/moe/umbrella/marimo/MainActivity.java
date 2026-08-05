@@ -692,6 +692,30 @@ public class MainActivity extends Activity {
             }
             for (Future<?> f : futs)
                 try { f.get(); } catch (Exception ignore) { }
+
+            /* pre-warm the album-cover art cache (bounded pool, bitmap is
+             * discarded after write) so navigating back to the library later
+             * hits the disk cache instead of re-decoding from SAF on the spot */
+            for (Album a : found) {
+                int coverIdx = -1;
+                for (int i = 0; i < a.tracks.size(); i++)
+                    if (a.tracks.get(i).hasArt) { coverIdx = i; break; }
+                a.coverIdx = coverIdx;
+                sortAlbumTracks(a);
+                if (coverIdx < 0 || a.tracks.isEmpty()) continue;
+                final Track coverTrack = a.tracks.get(coverIdx);
+                final DocumentFile adoc = (DocumentFile) a.albumDoc;
+                futs.add(pool.submit(() -> {
+                    /* decode + write to disk cache; the bitmap is discarded so
+                     * at most pool-size covers are in memory at once */
+                    if (LibraryCache.readArt(MainActivity.this, coverTrack.token) != null)
+                        return;
+                    loadArt(coverTrack.token, adoc);
+                    coverTrack.art = null;   /* don't hold it; navigation re-reads cache */
+                }));
+            }
+            for (Future<?> f : futs)
+                try { f.get(); } catch (Exception ignore) { }
             pool.shutdown();
             runOnUiThread(() -> {
                 FrameLayout layer = findViewById(R.id.scan_progress_layer);
@@ -699,14 +723,8 @@ public class MainActivity extends Activity {
             });
 
             for (Album a : found) {
-                /* art lazy: only decode the album cover, on demand — not every track */
                 a.resolvedCover = false;
-                int first = -1;
-                for (int i = 0; i < a.tracks.size(); i++)
-                    if (a.tracks.get(i).hasArt) { first = i; break; }
-                a.coverIdx = first;
-                sortAlbumTracks(a);
-                if (!a.tracks.isEmpty()) addAlbum(a);
+                addAlbum(a);
             }
             Collections.sort(albums, (a, b) ->
                     a.folder.compareToIgnoreCase(b.folder));
@@ -950,7 +968,9 @@ public class MainActivity extends Activity {
             Bitmap b = loadArt(cover.token, (DocumentFile) a.albumDoc);
             if (b != null) {
                 runOnUiThread(() -> {
-                    cover.art = b;
+                    /* share the cover across the album so the folder view
+                     * shows art on every row, not just the cover track */
+                    for (Track t : a.tracks) t.art = b;
                     adapter.notifyDataSetChanged();
                 });
             }

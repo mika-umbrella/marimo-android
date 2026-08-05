@@ -41,4 +41,14 @@
             android:textSize="13sp"
             android:textColor="#6b6b76" />
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/item_dur"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:layout_marginStart="8dp"
+        android:gravity="center_vertical"
+        android:maxLines="1"
+        android:textSize="12sp"
+        android:textColor="#6b6b76" />
 </LinearLayout>

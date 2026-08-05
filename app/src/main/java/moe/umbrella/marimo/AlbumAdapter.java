@@ -40,12 +40,15 @@ public class AlbumAdapter extends ArrayAdapter<Object> {
         TextView title = convert.findViewById(R.id.item_title);
         TextView sub = convert.findViewById(R.id.item_artist);
         ImageView art = convert.findViewById(R.id.item_art);
+        TextView dur = convert.findViewById(R.id.item_dur);
         title.setTextColor(Theme.txt());
         sub.setTextColor(Theme.dim());
+        dur.setTextColor(Theme.dim());
         if (o instanceof Album) {
             Album a = (Album) o;
             title.setText(a.titleLine());
             sub.setText(a.subLine());
+            dur.setText(a.tracks.size() + " pts");
             if (a.coverIdx >= 0 && a.tracks.get(a.coverIdx).art != null)
                 art.setImageBitmap(a.tracks.get(a.coverIdx).art);
             else
@@ -54,9 +57,16 @@ public class AlbumAdapter extends ArrayAdapter<Object> {
             Track t = (Track) o;
             title.setText(t.title.isEmpty() ? t.name : t.title);
             sub.setText(t.artist.isEmpty() ? t.name : t.artist);
+            dur.setText(fmt(t.durationMs));
             if (t.art != null) art.setImageBitmap(t.art);
             else art.setImageResource(android.R.drawable.ic_media_play);
         }
         return convert;
+    }
+
+    static String fmt(long ms) {
+        if (ms <= 0) return "";
+        long s = ms / 1000;
+        return (s / 60) + ":" + String.format("%02d", s % 60);
     }
 }

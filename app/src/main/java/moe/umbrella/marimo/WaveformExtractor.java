@@ -38,11 +38,18 @@ public class WaveformExtractor {
     }
 
     /** persist a waveform once so repeat listens (even across launches) are
-     *  instant — the full MediaCodec decode only ever happens one time. */
+     *  instant — the full MediaCodec decode only ever happens one time.
+     *  compact: 64-bit token hash (8B) + 96 peak bytes ≈ ~104B per track. */
+    private static long tokenHash(String token) {
+        long h = 1125899906842597L;
+        for (int i = 0; i < token.length(); i++) h = 31 * h + token.charAt(i);
+        return h;
+    }
+
     private static java.io.File cacheFile(Context ctx, String token) {
         java.io.File d = new java.io.File(ctx.getFilesDir(), CACHE_DIR);
         d.mkdirs();
-        return new java.io.File(d, Math.abs(token.hashCode()) + "_" + token.length() + ".wf");
+        return new java.io.File(d, Long.toHexString(tokenHash(token)) + ".wf");
     }
 
     private static int[] readDisk(Context ctx, String token) {
@@ -51,12 +58,9 @@ public class WaveformExtractor {
             if (!f.exists()) return null;
             try (java.io.DataInputStream in = new java.io.DataInputStream(
                     new java.io.FileInputStream(f))) {
-                for (int i = 0; i < token.length(); i++)
-                    if (in.readChar() != token.charAt(i)) return null;
-                int n = in.readInt();
-                if (n != BUCKETS) return null;
+                if (in.readLong() != tokenHash(token)) return null;
                 int[] p = new int[BUCKETS];
-                for (int i = 0; i < BUCKETS; i++) p[i] = in.readInt();
+                for (int i = 0; i < BUCKETS; i++) p[i] = in.readUnsignedByte();
                 return p;
             }
         } catch (Exception e) { return null; }
@@ -67,9 +71,8 @@ public class WaveformExtractor {
             java.io.File tmp = new java.io.File(ctx.getFilesDir(), CACHE_DIR + "/.tmp");
             try (java.io.DataOutputStream out = new java.io.DataOutputStream(
                     new java.io.FileOutputStream(tmp))) {
-                out.writeChars(token);
-                out.writeInt(peaks.length);
-                for (int p : peaks) out.writeInt(p);
+                out.writeLong(tokenHash(token));
+                for (int p : peaks) out.writeByte(p);
             }
             tmp.renameTo(cacheFile(ctx, token));
         } catch (Exception e) { }

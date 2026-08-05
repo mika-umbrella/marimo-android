@@ -145,6 +145,8 @@ public class MainActivity extends Activity {
         ((TextView) findViewById(R.id.p_track)).setSelected(true);
         ((TextView) findViewById(R.id.p_album)).setHorizontallyScrolling(true);
         ((TextView) findViewById(R.id.p_album)).setSelected(true);
+        ((TextView) findViewById(R.id.p_artist)).setHorizontallyScrolling(true);
+        ((TextView) findViewById(R.id.p_artist)).setSelected(true);
         pPlay = findViewById(R.id.p_play);
         ImageButton pShuffle = findViewById(R.id.p_shuffle);
         ImageButton pRepeat = findViewById(R.id.p_repeat);

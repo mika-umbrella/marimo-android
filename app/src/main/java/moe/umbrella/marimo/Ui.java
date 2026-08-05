@@ -17,6 +17,12 @@ public class Ui {
         v.setBackground(stateBg(Theme.panel(), Theme.panelHi(), dp(v, 14)));
     }
 
+    /** translucent rounded panel that flashes the accent GREEN on press
+     *  (settings rows matching the transport/tab buttons) */
+    public static void panelPress(View v) {
+        v.setBackground(stateBg(Theme.panel(), Theme.rowSel(), dp(v, 14)));
+    }
+
     /** tab: transparent, square highlight that fills the whole button on
      *  press, sub-coloured label */
     public static void tab(Button b) {

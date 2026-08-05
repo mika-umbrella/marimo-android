@@ -20,10 +20,24 @@ public class Album {
         parse(folder);
     }
 
-    private static final Pattern YEAR = Pattern.compile("\\((\\d{4})\\)");
+    /* a 4-digit year in ROUND or SQUARE brackets — square matters because a
+     * naked [YYYY] (no separate [FORMAT]) would otherwise be eaten as a
+     * [FORMAT] below. Round is the normal scheme, square is the loose one. */
+    private static final Pattern YEAR = Pattern.compile("\\((\\d{4})\\)|\\[(\\d{4})\\]");
 
     private void parse(String name) {
         name = name.trim();
+        /* pull the year out FIRST so a square-bracket year isn't mistaken for
+         * the trailing [FORMAT] */
+        Matcher ym = YEAR.matcher(name);
+        if (ym.find()) {
+            String y = ym.group(1) != null ? ym.group(1) : ym.group(2);
+            if (y != null) {
+                year = Integer.parseInt(y);
+                name = (name.substring(0, ym.start()) + " " + name.substring(ym.end())).trim();
+            }
+        }
+        /* now a trailing [FORMAT] is safe to strip (any year text is gone) */
         int fmtStart = name.lastIndexOf('[');
         if (fmtStart > 0 && name.endsWith("]")) {
             format = name.substring(fmtStart + 1, name.length() - 1).trim();

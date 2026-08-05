@@ -58,11 +58,10 @@ public class MainActivity extends Activity {
             final android.graphics.drawable.Drawable d =
                     BgManager.gradientFor(MainActivity.this, currentArt, Theme.scrim(), t);
             ui.post(() -> { if (rootView != null) rootView.setBackground(d); });
-            /* fully stop the loop when nothing is playing — the bg holds its
-             * last static frame, the UI can go idle, and battery's spared.
-             * updatePlayerUi restarts it the moment playback resumes. */
-            if (PlaybackService.isPlaying())
-                w.postDelayed(this, BG_INTERVAL_MS);
+            /* keep the loop alive; the time offset only advances while playing
+             * above, so the art holds still when paused but always drifts
+             * while music plays (no uiautomator tradeoff). */
+            w.postDelayed(this, BG_INTERVAL_MS);
         }
     };
     private static final long BG_INTERVAL_MS = 50;
@@ -1021,10 +1020,6 @@ public class MainActivity extends Activity {
     }
 
     private void updatePlayerUi() {
-        /* resume the drifting bg when playback starts (the loop self-stops
-         * when idle — see bgTick) */
-        if (PlaybackService.isPlaying() && bgWorker == null)
-            startBgLoop();
         /* follow auto-advance: when the playing item changes (gapless next),
          * refresh the title/art/waveform — showNowPlaying is not otherwise
          * called on automatic transitions, only on manual taps. */

@@ -70,20 +70,30 @@ public class WaveformExtractor {
     }
 
     private static int[] extract(Context ctx, String token) {
-        long total = countPass(ctx, token);
-        if (total <= 0) return null;
-
         MediaExtractor ex = open(ctx, token);
         if (ex == null) return null;
+        int rate = 44100;
+        long durUs = 0;
+        for (int i = 0; i < ex.getTrackCount(); i++) {
+            MediaFormat f = ex.getTrackFormat(i);
+            if (f.containsKey(MediaFormat.KEY_SAMPLE_RATE) && f.getString(MediaFormat.KEY_MIME) != null
+                    && f.getString(MediaFormat.KEY_MIME).startsWith("audio/"))
+                rate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+            if (f.containsKey(MediaFormat.KEY_DURATION))
+                durUs = Math.max(durUs, f.getLong(MediaFormat.KEY_DURATION));
+        }
         MediaCodec codec = openCodec(ex);
         if (codec == null) { ex.release(); return null; }
 
+        /* one decode pass: bucket each frame by its absolute sample index
+         * (from presentationTimeUs * rate), no separate count pass */
+        long total = rate <= 0 ? 1 : durUs * rate / 1000000L;   /* ~sample count */
+        if (total <= 0) total = 1;
         long[] sumsq = new long[BUCKETS];
-        int[] maxAmp = new int[BUCKETS];
         long[] counts = new long[BUCKETS];
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
         boolean eos = false;
-        long decoded = 0;
+        int stride = 4;            /* sample every 4th frame — faster, same envelope */
         try {
             while (!eos) {
                 int in = codec.dequeueInputBuffer(10000);
@@ -105,17 +115,18 @@ public class WaveformExtractor {
                     if (outBuf != null && info.size > 0) {
                         outBuf.position(info.offset);
                         outBuf.limit(info.offset + info.size);
+                        long bufStart = info.presentationTimeUs * rate / 1000000L;
                         int n = info.size / 2;
-                        long bufStart = decoded;
-                        decoded += n;
+                        n /= stride;
                         for (int i = 0; i < n; i++) {
+                            outBuf.position(info.offset + i * stride * 2);
                             short s = outBuf.getShort();
-                            int b = (int) ((bufStart + i) * BUCKETS / total);
+                            if (s == Short.MIN_VALUE) s = 0;
+                            long idx = bufStart + i * stride;
+                            int b = (int) (idx * BUCKETS / total);
                             if (b < 0) b = 0;
                             if (b >= BUCKETS) b = BUCKETS - 1;
-                            int v = s < 0 ? -s : s;
                             sumsq[b] += (long) s * s;
-                            if (v > maxAmp[b]) maxAmp[b] = v;
                             counts[b]++;
                         }
                     }

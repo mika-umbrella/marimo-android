@@ -2,11 +2,22 @@
 
 A tiny retro green pixel music player — the **[mikaplay](https://github.com/mika-umbrella)** desktop marimo, ported to Android.
 
+**dark theme**
+
 <p>
-  <img src="screens/lib.png" width="220" />
-  <img src="screens/player.png" width="220" />
-  <img src="screens/queue.png" width="220" />
-  <img src="screens/settings.png" width="220" />
+  <img src="screens/library-dark.jpg" width="220" />
+  <img src="screens/player-dark.jpg" width="220" />
+  <img src="screens/queue-dark.jpg" width="220" />
+  <img src="screens/settings-dark.jpg" width="220" />
+</p>
+
+**light theme**
+
+<p>
+  <img src="screens/library-light.jpg" width="220" />
+  <img src="screens/player-light.jpg" width="220" />
+  <img src="screens/queue-light.jpg" width="220" />
+  <img src="screens/settings-light.jpg" width="220" />
 </p>
 
 ## what it does

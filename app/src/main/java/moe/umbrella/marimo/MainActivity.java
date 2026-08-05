@@ -303,8 +303,9 @@ public class MainActivity extends Activity {
             }
         }
 
-        /* show the cached library instantly, then refresh in the background —
-         * startup no longer waits for the full SAF walk + tag reads */
+        /* the cache is authoritative: show it instantly and DON'T re-scan on
+         * every launch — the user rescans (incrementally) only after adding
+         * new files. a full scan happens only when there's no cache at all. */
         List<Album> cached = LibraryCache.load(this);
         if (!cached.isEmpty()) {
             albums.addAll(cached);
@@ -314,8 +315,9 @@ public class MainActivity extends Activity {
                     + totalTracks() + " tracks");
             /* covers are decoded lazily on demand by the adapter, so startup
              * never holds a Bitmap per track */
+        } else {
+            rescan();
         }
-        rescan();
         PlaybackService.attachQueueStorage(
                 new File(getFilesDir(), "queue.dat"));
         handler.post(uiTick);
@@ -663,6 +665,12 @@ public class MainActivity extends Activity {
 
     private void rescan() {
         new Thread(() -> {
+            /* incremental: remember what we already know so rescans only read
+             * tags/art for genuinely new tracks (the cache is authoritative) */
+            HashMap<String, Track> known = new HashMap<>();
+            for (Album k : LibraryCache.load(this))
+                for (Track kt : k.tracks) known.put(kt.token, kt);
+
             albums.clear();
             openAlbum = null;
             List<Album> found = new ArrayList<>();
@@ -680,8 +688,6 @@ public class MainActivity extends Activity {
                 if (circle != null) circle.setProgress(0, totalAlbums, "0 / " + totalAlbums);
             });
 
-            /* tags only — art is decoded lazily per album cover (holding a full
-             * bitmap on every track blew up memory at ~950 files / 3.8GB) */
             ExecutorService pool = Executors.newFixedThreadPool(
                     Math.max(2, Runtime.getRuntime().availableProcessors()));
             List<Future<?>> futs = new ArrayList<>();
@@ -691,9 +697,26 @@ public class MainActivity extends Activity {
                 final int nTracks = a.tracks.size();
                 final java.util.concurrent.atomic.AtomicInteger remaining =
                         new java.util.concurrent.atomic.AtomicInteger(nTracks);
-                for (Track t : a.tracks)
+                for (Track t : a.tracks) {
+                    final Track ft = t;
                     futs.add(pool.submit(() -> {
-                        readTags(t, dirs.get(t));
+                        /* reuse cached metadata when we've already scanned this
+                         * token — only fresh files pay for a real tag read */
+                        Track prior = known.get(ft.token);
+                        if (prior != null
+                                && (!prior.title.isEmpty() || !prior.name.isEmpty())) {
+                            ft.title = prior.title;
+                            ft.artist = prior.artist;
+                            ft.album = prior.album;
+                            ft.durationMs = prior.durationMs;
+                            ft.track = prior.track;
+                            ft.disc = prior.disc;
+                            ft.hasArt = prior.hasArt
+                                    || LibraryCache.hasArtOnDisk(
+                                            MainActivity.this, ft.token);
+                        } else {
+                            readTags(ft, dirs.get(ft));
+                        }
                         if (remaining.decrementAndGet() == 0) {
                             int d = albumDone.incrementAndGet();
                             runOnUiThread(() -> {
@@ -704,6 +727,7 @@ public class MainActivity extends Activity {
                             });
                         }
                     }));
+                }
             }
             for (Future<?> f : futs)
                 try { f.get(); } catch (Exception ignore) { }

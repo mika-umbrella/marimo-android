@@ -46,6 +46,7 @@ public class LibraryCache {
                     if (t.durationMs > 0) w.write("td=" + t.durationMs + "\n");
                     if (t.track > 0) w.write("ttr=" + t.track + "\n");
                     if (t.disc > 0) w.write("tdc=" + t.disc + "\n");
+                    if (t.hasArt) w.write("tha=1\n");
                 }
                 w.write("\n");
             }
@@ -98,6 +99,8 @@ public class LibraryCache {
                 } else if (tr != null && line.startsWith("tdc=")) {
                     try { tr.disc = Integer.parseInt(line.substring(4)); }
                     catch (Exception ignore) { }
+                } else if (tr != null && line.startsWith("tha=")) {
+                    tr.hasArt = line.substring(4).equals("1");
                 } else if (cur != null && line.startsWith("an=")) {
                     cur.artist = line.substring(3);
                 } else if (cur != null && line.startsWith("ay=")) {
@@ -170,6 +173,13 @@ public class LibraryCache {
             Bitmap b = BitmapFactory.decodeFile(f.getAbsolutePath());
             return b;
         } catch (Exception e) { return null; }
+    }
+
+    /** cheap presence check — is this album's cover already on disk? (no
+     *  bitmap decode, so it's safe to call for every reused track). */
+    public static boolean hasArtOnDisk(Context ctx, String token) {
+        try { return artFile(ctx, token).exists(); }
+        catch (Exception e) { return false; }
     }
 
     /** store a downscaled JPEG so the next launch doesn't re-read + re-decode.

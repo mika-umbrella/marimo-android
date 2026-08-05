@@ -68,8 +68,9 @@ public class Scrobbler {
     /** call when a track ends; returns true if it was scrobblable+submitted */
     public static void scrobble(final Track t, final long playedMs) {
         if (t == null) return;
+        final boolean q = qualifies(t, playedMs);
         Thread th = new Thread(() -> {
-            if (!qualifies(t, playedMs)) return;
+            if (!q) return;
             if (hasLf()) lfScrobble(t, playedMs);
             if (hasLb()) lbScrobble(t, playedMs);
         });
@@ -79,10 +80,15 @@ public class Scrobbler {
 
     /** desktop rule: >=50% of duration or >=4 minutes, track longer than 30s */
     private static boolean qualifies(Track t, long playedMs) {
-        if (t.durationMs <= 30000) return false;         /* too short */
-        long half = t.durationMs / 2;
         long fourMin = 4 * 60 * 1000;
-        return playedMs >= half || playedMs >= fourMin;
+        if (t.durationMs > 0) {
+            if (t.durationMs <= 30000) return false;     /* too short */
+            long half = t.durationMs / 2;
+            return playedMs >= half || playedMs >= fourMin;
+        }
+        /* duration unknown (mp3 tag read gives none) — require a long enough
+         * play so we don't scrobble things we can't verify */
+        return playedMs >= fourMin;
     }
 
     /* ---------------- last.fm ---------------- */

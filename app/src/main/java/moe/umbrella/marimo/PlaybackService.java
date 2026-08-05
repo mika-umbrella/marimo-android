@@ -224,9 +224,6 @@ public class PlaybackService extends MediaSessionService {
             }
             @Override public void onMediaItemTransition(
                     androidx.media3.common.MediaItem mi, int reason) {
-                /* the old track finished (possibly via gapless) — scrobble it
-                 * with how long it actually played BEFORE switching to the new
-                 * one and sending its now-playing. */
                 if (activeTrack != null)
                     Scrobbler.scrobble(activeTrack, activePlayMs);
                 activeTrack = null;
@@ -414,6 +411,8 @@ public class PlaybackService extends MediaSessionService {
                         }
                     }
                     durationMs = dur;
+                    if (dur > 0 && activeTrack != null && activeTrack.durationMs <= 0)
+                        activeTrack.durationMs = (int) dur;   /* mp3 etc: tag read had none */
                     long pos = player.getCurrentPosition();
                     positionMs = pos;
                     long delta = pos - lastTickPos;

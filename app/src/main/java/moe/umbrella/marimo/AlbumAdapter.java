@@ -48,7 +48,7 @@ public class AlbumAdapter extends ArrayAdapter<Object> {
             Album a = (Album) o;
             title.setText(a.titleLine());
             sub.setText(a.subLine());
-            dur.setText(a.tracks.size() + " pts");
+            dur.setText(a.tracks.size() + " songs");
             if (a.coverIdx >= 0 && a.tracks.get(a.coverIdx).art != null)
                 art.setImageBitmap(a.tracks.get(a.coverIdx).art);
             else

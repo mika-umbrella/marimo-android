@@ -389,6 +389,37 @@ static int id3_parse(FILE *f, Meta *meta, int *track, int *disc)
 
 /* ---------------- public ---------------- */
 
+/* estimate MP3 duration from the first MPEG audio frame header + file size.
+ * called with the FILE* positioned right after the ID3 tag. bitrate-based, so
+ * VBR is approximate — fine for a library length + scrobble threshold. */
+static void mp3_duration(FILE *f, Meta *meta)
+{
+    unsigned char h[4];
+    long start, end;
+    unsigned long long bytes;
+    int br;
+    if (!meta || meta->duration_ms > 0) return;
+    if (fread(h, 1, 4, f) != 4) return;
+    if (h[0] != 0xFF || (h[1] & 0xE0) != 0xE0) return;   /* no sync */
+    int ver = (h[1] >> 3) & 3;      /* 3=MPEG1, 2=MPEG2, 0=2.5 */
+    int layer = (h[1] >> 1) & 3;    /* 1=Layer III (mp3) */
+    if (layer != 1 || ver == 1) return;
+    int brI = (h[2] >> 4) & 0xF;
+    if (brI == 0 || brI == 15) return;
+    static const int v1[16] = {0,32,40,48,56,64,80,96,112,128,160,192,224,256,320,0};
+    static const int v2[16] = {0,8,16,24,32,40,48,56,64,80,96,112,128,144,160,0};
+    br = (ver == 3) ? v1[brI] : v2[brI];
+    if (br <= 0) return;
+    start = ftell(f);
+    if (start < 0) return;
+    if (fseek(f, 0, SEEK_END) != 0) return;
+    end = ftell(f);
+    fseek(f, start, SEEK_SET);
+    bytes = (unsigned long long)(end - start);
+    if ((long)bytes <= 0) return;
+    meta->duration_ms = (int)(bytes * 8 / br);   /* br kbps -> bytes*8/br = ms */
+}
+
 /* shared body: parse tags from an open file (caller owns *f).
  * portable core — the android port passes SAF file descriptors here. */
 static int tag_read_f(FILE *f, Meta *meta, int *track, int *disc)
@@ -404,6 +435,8 @@ static int tag_read_f(FILE *f, Meta *meta, int *track, int *disc)
         rc = flac_parse(f, meta, &tr, &dc);
     } else if (!memcmp(magic, "ID3", 3)) {
         rc = id3_parse(f, meta, &tr, &dc);
+        if (meta && meta->duration_ms <= 0)
+            mp3_duration(f, meta);   /* f is positioned after the ID3 tag */
     }
     if (meta) {
         meta->have_meta = meta->title[0] || meta->artist[0] || meta->album[0] || meta->duration_ms > 0;

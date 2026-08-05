@@ -33,6 +33,14 @@ public class PlaybackService extends MediaSessionService {
     private static volatile int shuffle = 0, repeat = 0;   /* 0 off,1 on / 0 off,1 all,2 one */
     private static volatile PlaybackService instance;
 
+    /* scrobble tracking: the player runs gapless, so tracks change via
+     * MediaItemTransition and STATE_ENDED never fires mid-album. keep the
+     * running track + how long it actually played, and scrobble the previous
+     * one each time we move on. */
+    private Track activeTrack;
+    private long activePlayMs;
+    private long lastTickPos;
+
     private ExoPlayer player;
     private MediaSession session;
     private android.os.Handler tickHandler;
@@ -204,20 +212,39 @@ public class PlaybackService extends MediaSessionService {
                 playing = b;
                 if (b) {
                     Track cur = currentTrack();
-                    if (cur != null) Scrobbler.nowPlaying(cur);
+                    if (cur != null) {
+                        if (activeTrack == null) {
+                            activeTrack = cur;
+                            activePlayMs = 0;
+                            lastTickPos = 0;
+                        }
+                        Scrobbler.nowPlaying(cur);
+                    }
                 }
             }
             @Override public void onMediaItemTransition(
                     androidx.media3.common.MediaItem mi, int reason) {
+                /* the old track finished (possibly via gapless) — scrobble it
+                 * with how long it actually played BEFORE switching to the new
+                 * one and sending its now-playing. */
+                if (activeTrack != null)
+                    Scrobbler.scrobble(activeTrack, activePlayMs);
+                activeTrack = null;
+                activePlayMs = 0;
+                lastTickPos = 0;
                 if (mi != null && mi.localConfiguration != null
                         && mi.localConfiguration.tag instanceof Track) {
-                    Scrobbler.nowPlaying((Track) mi.localConfiguration.tag);
+                    Track nt = (Track) mi.localConfiguration.tag;
+                    activeTrack = nt;
+                    Scrobbler.nowPlaying(nt);
                 }
             }
             @Override public void onPlaybackStateChanged(int state) {
-                if (state == Player.STATE_ENDED) {
-                    Track t = currentTrack();
-                    if (t != null) Scrobbler.scrobble(t, t.durationMs);
+                if (state == Player.STATE_ENDED
+                        && activeTrack != null) {
+                    /* reached the end of the queue (no auto-next) — scrobble */
+                    Scrobbler.scrobble(activeTrack, activePlayMs);
+                    activeTrack = null;
                 }
             }
             @Override public void onPlayerError(androidx.media3.common.PlaybackException e) {
@@ -387,7 +414,12 @@ public class PlaybackService extends MediaSessionService {
                         }
                     }
                     durationMs = dur;
-                    positionMs = player.getCurrentPosition();
+                    long pos = player.getCurrentPosition();
+                    positionMs = pos;
+                    long delta = pos - lastTickPos;
+                    lastTickPos = pos;
+                    if (playing && delta > 0 && activeTrack != null)
+                        activePlayMs += delta;
                 }
                 tickHandler.postDelayed(this, 200);
             }

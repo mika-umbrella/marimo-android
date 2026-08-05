@@ -49,17 +49,20 @@ public class MainActivity extends Activity {
     private final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable bgTick = new Runnable() {
         @Override public void run() {
-            if (bgWorker == null) return;
-            /* freeze the drift when nothing is playing: time only advances
-             * while music is playing, so the art bg holds still when
-             * paused/stopped and drifts again on resume */
+            android.os.Handler w = bgWorker;   /* capture once — beat the
+                stopBgLoop() race that nulled it mid-tick on real hardware */
+            if (w == null) return;
             if (PlaybackService.isPlaying())
                 lastPlayMs = System.currentTimeMillis();
             float t = (lastPlayMs - animStart) / 1000f;
             final android.graphics.drawable.Drawable d =
                     BgManager.gradientFor(MainActivity.this, currentArt, Theme.scrim(), t);
             ui.post(() -> { if (rootView != null) rootView.setBackground(d); });
-            bgWorker.postDelayed(this, BG_INTERVAL_MS);
+            /* fully stop the loop when nothing is playing — the bg holds its
+             * last static frame, the UI can go idle, and battery's spared.
+             * updatePlayerUi restarts it the moment playback resumes. */
+            if (PlaybackService.isPlaying())
+                w.postDelayed(this, BG_INTERVAL_MS);
         }
     };
     private static final long BG_INTERVAL_MS = 50;
@@ -120,6 +123,25 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        /* crash-to-file logger: dump any uncaught exception to Downloads so
+         * a non-adb tester can grab it after a crash. */
+        final Thread.UncaughtExceptionHandler prev =
+                Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            try {
+                java.io.File f = new java.io.File(
+                        android.os.Environment.getExternalStoragePublicDirectory(
+                                android.os.Environment.DIRECTORY_DOWNLOADS),
+                        "marimo_crash.txt");
+                java.io.PrintWriter w = new java.io.PrintWriter(
+                        new java.io.FileWriter(f, true));
+                w.println("=== " + new java.util.Date() + " thread=" + t.getName());
+                e.printStackTrace(w);
+                w.close();
+            } catch (Exception ignore) { }
+            if (prev != null) prev.uncaughtException(t, e);
+            else android.os.Process.killProcess(android.os.Process.myPid());
+        });
         setContentView(R.layout.activity_main);
 
         rootView = findViewById(R.id.root);
@@ -941,6 +963,10 @@ public class MainActivity extends Activity {
     }
 
     private void updatePlayerUi() {
+        /* resume the drifting bg when playback starts (the loop self-stops
+         * when idle — see bgTick) */
+        if (PlaybackService.isPlaying() && bgWorker == null)
+            startBgLoop();
         /* follow auto-advance: when the playing item changes (gapless next),
          * refresh the title/art/waveform — showNowPlaying is not otherwise
          * called on automatic transitions, only on manual taps. */

@@ -319,9 +319,21 @@ public class PlaybackService extends MediaSessionService {
         return s != null ? s.currentTrack() : null;
     }
 
+    private void ensureChannel() {
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            android.app.NotificationChannel ch = new android.app.NotificationChannel(
+                    "marimo_playback", "Playback",
+                    android.app.NotificationManager.IMPORTANCE_LOW);
+            android.app.NotificationManager nm =
+                    getSystemService(android.app.NotificationManager.class);
+            if (nm != null) nm.createNotificationChannel(ch);
+        }
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
+        ensureChannel();
         instance = this;
         player = makePlayer();
         session = new MediaSession.Builder(this, player)

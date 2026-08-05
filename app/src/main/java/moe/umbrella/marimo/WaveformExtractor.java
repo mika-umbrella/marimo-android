@@ -156,13 +156,32 @@ public class WaveformExtractor {
         return peaks;
     }
 
+    /** map an externalstorage content:// tree doc to /storage/emulated/0/... */
+    private static String pathOf(String token) {
+        try {
+            String p = Uri.parse(token).getPath();
+            int i = p == null ? -1 : p.indexOf("/document/");
+            if (i < 0) return null;
+            String id = Uri.decode(p.substring(i + 10));
+            if (!id.startsWith("primary:")) return null;
+            return "/storage/emulated/0/" + id.substring("primary:".length());
+        } catch (Exception e) { return null; }
+    }
+
     private static MediaExtractor open(Context ctx, String token) {
         MediaExtractor ex = new MediaExtractor();
         try {
-            if (token.startsWith("content://"))
-                ex.setDataSource(ctx, Uri.parse(token), null);
-            else
+            if (token.startsWith("content://")) {
+                /* waydroid's provider NPEs on unindexed files — fall back to
+                 * reading the real path (MediaExtractor opens a file path). */
+                String path = pathOf(token);
+                if (path != null && new java.io.File(path).isFile())
+                    ex.setDataSource(path);
+                else
+                    ex.setDataSource(ctx, Uri.parse(token), null);
+            } else {
                 ex.setDataSource(token);
+            }
         } catch (Exception e) {
             return null;
         }

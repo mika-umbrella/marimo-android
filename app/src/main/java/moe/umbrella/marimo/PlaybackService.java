@@ -112,10 +112,16 @@ public class PlaybackService extends MediaSessionService {
             synchronized (tracks) {
                 tracks = new ArrayList<>();
                 for (int i = 0; i < toks.size(); i++) {
-                    java.io.File f = new java.io.File(toks.get(i));
-                    if (!f.exists()) continue;             /* file gone (desktop rule) */
-                    Track t = new Track(toks.get(i),
-                            i < names.size() ? names.get(i) : toks.get(i));
+                    String tok = toks.get(i);
+                    /* desktop rule: drop vanished plain-file entries. content://
+                     * tokens can't be checked with new File().exists() (they're
+                     * URIs, not paths) — keep them so android queues restore. */
+                    if (!tok.startsWith("content://")) {
+                        java.io.File f = new java.io.File(tok);
+                        if (!f.exists()) continue;
+                    }
+                    Track t = new Track(tok,
+                            i < names.size() ? names.get(i) : tok);
                     if (i < titles.size()) t.title = titles.get(i);
                     if (i < artists.size()) t.artist = artists.get(i);
                     if (i < durs.size()) t.durationMs = durs.get(i);

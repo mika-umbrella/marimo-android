@@ -80,16 +80,20 @@
                 android:textSize="12sp"
                 android:textColor="#6b6b76" />
 
-            <ProgressBar
-                android:id="@+id/scan_progress"
-                style="?android:attr/progressBarStyleHorizontal"
+            <FrameLayout
+                android:id="@+id/scan_progress_layer"
                 android:layout_width="match_parent"
-                android:layout_height="6dp"
-                android:layout_marginTop="4dp"
-                android:layout_marginHorizontal="8dp"
-                android:max="100"
-                android:progress="0"
-                android:visibility="gone" />
+                android:layout_height="wrap_content"
+                android:visibility="gone">
+
+                <moe.umbrella.marimo.CircleProgress
+                    android:id="@+id/scan_circle"
+                    android:layout_width="120dp"
+                    android:layout_height="120dp"
+                    android:layout_gravity="center"
+                    android:layout_marginTop="12dp"
+                    android:layout_marginBottom="12dp" />
+            </FrameLayout>
 
             <LinearLayout
                 android:layout_width="match_parent"

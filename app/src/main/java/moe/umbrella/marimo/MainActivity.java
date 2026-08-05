@@ -23,8 +23,8 @@ import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.FrameLayout;
 import android.widget.ListView;
-import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -312,16 +312,8 @@ public class MainActivity extends Activity {
             adapter.notifyDataSetChanged();
             status.setText(albums.size() + " albums · "
                     + totalTracks() + " tracks");
-            /* load cached cover art in the background so the list isn't empty
-             * (iterate the local snapshot — rescan clears the live field) */
-            final List<Album> snapshot = cached;
-            new Thread(() -> {
-                for (Album a : snapshot)
-                    for (Track t : a.tracks)
-                        if (t.art == null)
-                            t.art = LibraryCache.readArt(this, t.token);
-                runOnUiThread(() -> adapter.notifyDataSetChanged());
-            }).start();
+            /* covers are decoded lazily on demand by the adapter, so startup
+             * never holds a Bitmap per track */
         }
         rescan();
         PlaybackService.attachQueueStorage(
@@ -665,48 +657,53 @@ public class MainActivity extends Activity {
             if (treeUri != null) scanTreeCollect(
                     DocumentFile.fromTreeUri(this, treeUri), found, dirs);
 
-            final int totalTracks = totalTracksOf(found);
+            final int totalAlbums = found.size();
             runOnUiThread(() -> {
-                ProgressBar bar = findViewById(R.id.scan_progress);
-                if (bar != null) {
-                    bar.setMax(totalTracks);
-                    bar.setProgress(0);
-                    bar.setVisibility(View.VISIBLE);
-                }
+                FrameLayout layer = findViewById(R.id.scan_progress_layer);
+                if (layer != null) layer.setVisibility(View.VISIBLE);
+                CircleProgress circle = findViewById(R.id.scan_circle);
+                if (circle != null) circle.setProgress(0, totalAlbums, "0 / " + totalAlbums);
             });
 
-            /* the slow part (tag + full-art reads) is independent per track:
-             * run it across a thread pool so multi-core tablets scan faster */
+            /* tags only — art is decoded lazily per album cover (holding a full
+             * bitmap on every track blew up memory at ~950 files / 3.8GB) */
             ExecutorService pool = Executors.newFixedThreadPool(
                     Math.max(2, Runtime.getRuntime().availableProcessors()));
             List<Future<?>> futs = new ArrayList<>();
-            java.util.concurrent.atomic.AtomicInteger done =
+            java.util.concurrent.atomic.AtomicInteger albumDone =
                     new java.util.concurrent.atomic.AtomicInteger();
-            for (Album a : found)
+            for (Album a : found) {
+                final int nTracks = a.tracks.size();
+                final java.util.concurrent.atomic.AtomicInteger remaining =
+                        new java.util.concurrent.atomic.AtomicInteger(nTracks);
                 for (Track t : a.tracks)
                     futs.add(pool.submit(() -> {
                         readTags(t, dirs.get(t));
-                        int d = done.incrementAndGet();
-                        if (d % 8 == 0 || d == totalTracks) {
-                            final int dd = d;
+                        if (remaining.decrementAndGet() == 0) {
+                            int d = albumDone.incrementAndGet();
                             runOnUiThread(() -> {
-                                ProgressBar bar = findViewById(R.id.scan_progress);
-                                if (bar != null) bar.setProgress(dd);
+                                CircleProgress circle = findViewById(R.id.scan_circle);
+                                if (circle != null)
+                                    circle.setProgress(d, totalAlbums,
+                                            d + " / " + totalAlbums);
                             });
                         }
                     }));
+            }
             for (Future<?> f : futs)
                 try { f.get(); } catch (Exception ignore) { }
             pool.shutdown();
             runOnUiThread(() -> {
-                ProgressBar bar = findViewById(R.id.scan_progress);
-                if (bar != null) bar.setVisibility(View.GONE);
+                FrameLayout layer = findViewById(R.id.scan_progress_layer);
+                if (layer != null) layer.setVisibility(View.GONE);
             });
 
             for (Album a : found) {
+                /* art lazy: only decode the album cover, on demand — not every track */
+                a.resolvedCover = false;
                 int first = -1;
                 for (int i = 0; i < a.tracks.size(); i++)
-                    if (a.tracks.get(i).art != null) { first = i; break; }
+                    if (a.tracks.get(i).hasArt) { first = i; break; }
                 a.coverIdx = first;
                 sortAlbumTracks(a);
                 if (!a.tracks.isEmpty()) addAlbum(a);
@@ -721,12 +718,6 @@ public class MainActivity extends Activity {
                         + totalTracks() + " tracks");
             });
         }).start();
-    }
-
-    private int totalTracksOf(List<Album> list) {
-        int n = 0;
-        for (Album a : list) n += a.tracks.size();
-        return n;
     }
 
     /** order album tracks by (disc, trackNo); fall back to the leading
@@ -808,6 +799,7 @@ public class MainActivity extends Activity {
         for (DocumentFile f : dir.listFiles()) {
             if (f.isDirectory()) {
                 Album a = new Album(f.getName());
+                a.albumDoc = f;
                 for (DocumentFile t : f.listFiles())
                     if (t.isFile() && isAudio(t.getName())) {
                         Track tr = new Track(t.getUri().toString(), t.getName());
@@ -856,10 +848,39 @@ public class MainActivity extends Activity {
                 t.track = tr[0];
                 t.disc = dc[0];
             }
-            t.art = loadArt(t.token, albumDir);
+            /* presence flag only — decode the cover lazily (holding a full
+             * Bitmap per track OOMs at ~950 files). raw bytes are discarded. */
+            t.hasArt = hasEmbeddedArt(t.token) || treeFolderCover(albumDir) != null;
+            t.art = null;   /* decoded on demand by loadArt */
         } catch (Exception e) {
             android.util.Log.e("marimo", "readTags failed: " + t.token, e);
         }
+    }
+
+    /** does this track carry an embedded picture? raw-bytes check, no decode.
+     *  reads (and discards) the art bytes to learn presence. */
+    private boolean hasEmbeddedArt(String token) {
+        try {
+            if (token.startsWith("content://")) {
+                ParcelFileDescriptor pfd = null;
+                try {
+                    pfd = getContentResolver()
+                            .openFileDescriptor(Uri.parse(token), "r");
+                    if (pfd != null) {
+                        byte[] b = NativeBridge.embeddedArtFd(pfd.detachFd());
+                        return b != null && b.length > 0;
+                    }
+                } catch (Exception e) { /* none */ }
+                finally {
+                    if (pfd != null)
+                        try { pfd.close(); } catch (Exception ignore) { }
+                }
+            } else {
+                byte[] b = NativeBridge.embeddedArtPath(token);
+                return b != null && b.length > 0;
+            }
+        } catch (Exception e) { }
+        return false;
     }
 
     /** read cover.jpg/folder.jpg/front.jpg from the audio file's folder —
@@ -917,6 +938,33 @@ public class MainActivity extends Activity {
             in.close();
             return out.toByteArray();
         } catch (Exception e) { return null; }
+    }
+
+    /** decode an album's cover art off the UI thread (on demand, once per
+     *  album) so the list never holds a Bitmap per track — the OOM fix. */
+    void decodeCoverAsync(Album a) {
+        if (a == null || a.coverIdx < 0
+                || a.coverIdx >= a.tracks.size()) return;
+        new Thread(() -> {
+            Track cover = a.tracks.get(a.coverIdx);
+            Bitmap b = loadArt(cover.token, (DocumentFile) a.albumDoc);
+            if (b != null) {
+                runOnUiThread(() -> {
+                    cover.art = b;
+                    adapter.notifyDataSetChanged();
+                });
+            }
+        }).start();
+    }
+
+    /** the album folder DocumentFile a track belongs to (for lazy art folder
+     *  covers), or null if not in any scanned album. */
+    private DocumentFile albumDocOf(Track t) {
+        for (Album a : albums) {
+            if (a.albumDoc != null && a.tracks.contains(t))
+                return (DocumentFile) a.albumDoc;
+        }
+        return null;
     }
 
     private Bitmap loadArt(String token, DocumentFile albumDir) {
@@ -1096,6 +1144,21 @@ public class MainActivity extends Activity {
         pAlbum.setText(t.album);
         pArt.setImageBitmap(t.art);
         repaintBg(t.art);
+        /* art is decoded lazily (null after a scan) — pull it in the background
+         * and repaint the player + gradient when it lands */
+        if (t.art == null) {
+            final Track ft = t;
+            new Thread(() -> {
+                Bitmap b = loadArt(ft.token, albumDocOf(ft));
+                runOnUiThread(() -> {
+                    if (b != null && shownToken.equals(ft.token)) {
+                        ft.art = b;
+                        pArt.setImageBitmap(b);
+                        repaintBg(b);
+                    }
+                });
+            }).start();
+        }
         /* real waveform (async decode — never block the UI thread).
          * while it loads, the seekbar shows a flat silent baseline */
         pSeek.resetWaveform();

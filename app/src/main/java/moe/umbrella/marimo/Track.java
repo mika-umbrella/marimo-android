@@ -12,7 +12,8 @@ public class Track {
     public int durationMs;
     public int track;
     public int disc;
-    public Bitmap art;           // embedded cover from the C core
+    public boolean hasArt;      // embedded/cover art present (set at scan)
+    public Bitmap art;           // lazily decoded cover — null until needed
 
     public Track(String token, String name) {
         this.token = token;

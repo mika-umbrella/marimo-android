@@ -49,6 +49,7 @@ public class AlbumAdapter extends ArrayAdapter<Object> {
             title.setText(a.titleLine());
             sub.setText(a.subLine());
             dur.setText(a.tracks.size() + " songs");
+            requestCover(a);
             if (a.coverIdx >= 0 && a.tracks.get(a.coverIdx).art != null)
                 art.setImageBitmap(a.tracks.get(a.coverIdx).art);
             else
@@ -62,6 +63,16 @@ public class AlbumAdapter extends ArrayAdapter<Object> {
             else art.setImageResource(android.R.drawable.ic_media_play);
         }
         return convert;
+    }
+
+    /** ask the activity to decode this album's cover in the background (once),
+     *  then the list refreshes — keeps big libraries from OOMing on a Bitmap
+     *  per track by decoding only what's on screen, on demand. */
+    private void requestCover(Album a) {
+        if (a.resolvedCover || a.coverIdx < 0) return;
+        a.resolvedCover = true;   /* fire-once guard; MainActivity repaints on load */
+        MainActivity act = (MainActivity) getContext();
+        act.decodeCoverAsync(a);
     }
 
     static String fmt(long ms) {

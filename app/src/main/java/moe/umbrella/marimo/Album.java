@@ -12,6 +12,8 @@ public class Album {
     public int year;
     public String format;
     public int coverIdx;      // index into tracks for the cover art
+    public transient java.lang.Object albumDoc;   // DocumentFile dir (lazy art)
+    public boolean resolvedCover;                 // cover art decoded (lazy)
     public java.util.List<Track> tracks = new java.util.ArrayList<>();
 
     public Album(String folder) {

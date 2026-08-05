@@ -68,13 +68,20 @@ public class WaveformExtractor {
 
     private static void writeDisk(Context ctx, String token, int[] peaks) {
         try {
-            java.io.File tmp = new java.io.File(ctx.getFilesDir(), CACHE_DIR + "/.tmp");
+            java.io.File d = new java.io.File(ctx.getFilesDir(), CACHE_DIR);
+            d.mkdirs();   /* the first write needs the dir before the .tmp path */
+            java.io.File tmp = new java.io.File(d, ".tmp");
             try (java.io.DataOutputStream out = new java.io.DataOutputStream(
                     new java.io.FileOutputStream(tmp))) {
                 out.writeLong(tokenHash(token));
                 for (int p : peaks) out.writeByte(p);
             }
-            tmp.renameTo(cacheFile(ctx, token));
+            if (!tmp.renameTo(cacheFile(ctx, token))) {
+                java.io.File dst = cacheFile(ctx, token);
+                java.nio.file.Files.copy(tmp.toPath(), dst.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                tmp.delete();
+            }
         } catch (Exception e) { }
     }
 

@@ -20,24 +20,47 @@ public class Album {
         parse(folder);
     }
 
-    /* a 4-digit year in ROUND or SQUARE brackets — square matters because a
-     * naked [YYYY] (no separate [FORMAT]) would otherwise be eaten as a
-     * [FORMAT] below. Round is the normal scheme, square is the loose one. */
-    private static final Pattern YEAR = Pattern.compile("\\((\\d{4})\\)|\\[(\\d{4})\\]");
+    /* a 4-digit plausible year (1900-2099) */
+    private static final Pattern YEAR4 =
+            Pattern.compile("(19\\d\\d|20\\d\\d)");
+    /* a (..) or [..] bracket group (round and square matched independently,
+     * so an open round can't be closed by a square) */
+    private static final Pattern BRACKET =
+            Pattern.compile("\\(([^()]*)\\)|\\[([^\\[\\]]*)\\]");
+    /* a bare standalone year in the album title: not part of a word (letters),
+     * a range (X-Y), or inside any bracket — and plausibility-gated by YEAR4. */
+    private static final Pattern BARE =
+            Pattern.compile("(?<![A-Za-z0-9(\\[\\-])(19\\d\\d|20\\d\\d)(?![A-Za-z0-9\\-])");
 
     private void parse(String name) {
         name = name.trim();
-        /* pull the year out FIRST so a square-bracket year isn't mistaken for
-         * the trailing [FORMAT] */
-        Matcher ym = YEAR.matcher(name);
-        if (ym.find()) {
-            String y = ym.group(1) != null ? ym.group(1) : ym.group(2);
-            if (y != null) {
-                year = Integer.parseInt(y);
-                name = (name.substring(0, ym.start()) + " " + name.substring(ym.end())).trim();
+        /* {..} groups are distro/catalog IDs — strip, never a year */
+        name = name.replaceAll("\\{[^}]*\\}", " ").trim();
+
+        /* bracketed year tag is AUTHORITATIVE: a (..)/[..] whose content is a
+         * bare year or date with no letters (rejects "(2026 Remaster)"). take
+         * the earliest year when there are several "(1999, 2008)" -> 1999. */
+        Matcher bm = BRACKET.matcher(name);
+        while (bm.find()) {
+            String inner = (bm.group(1) != null ? bm.group(1) : bm.group(2)).trim();
+            if (inner.isEmpty() || inner.matches(".*[A-Za-z].*")) continue;
+            Matcher y4 = YEAR4.matcher(inner);
+            int best = Integer.MAX_VALUE;
+            boolean found = false;
+            while (y4.find()) {
+                best = Math.min(best, Integer.parseInt(y4.group(1)));
+                found = true;
+            }
+            if (found) {
+                year = best;
+                name = (name.substring(0, bm.start())
+                        + " " + name.substring(bm.end())).trim();
+                break;
             }
         }
-        /* now a trailing [FORMAT] is safe to strip (any year text is gone) */
+
+        /* now a trailing [FORMAT] is safe to strip (any square-bracket year is
+         * already gone above) */
         int fmtStart = name.lastIndexOf('[');
         if (fmtStart > 0 && name.endsWith("]")) {
             format = name.substring(fmtStart + 1, name.length() - 1).trim();
@@ -48,10 +71,15 @@ public class Album {
             artist = name.substring(0, dash).trim();
             name = name.substring(dash + 3).trim();
         }
-        Matcher m = YEAR.matcher(name);
-        if (m.find()) {
-            year = Integer.parseInt(m.group(1));
-            name = (name.substring(0, m.start()) + " " + name.substring(m.end())).trim();
+        /* bare standalone year — only if no bracketed year won above, and only
+         * a plausible value (1234 / 9801 fall outside 1900-2099 and are ignored) */
+        if (year == 0) {
+            Matcher m = BARE.matcher(name);
+            if (m.find()) {
+                year = Integer.parseInt(m.group(1));
+                name = (name.substring(0, m.start())
+                        + " " + name.substring(m.end())).trim();
+            }
         }
         album = name.isEmpty() ? folder : name;
     }

@@ -135,10 +135,31 @@ public class LibraryCache {
         return h;
     }
 
+    /** art cache key: the album's folder, not the per-track token — all tracks
+     *  in an album share one cover, so one JPEG per album (685 not 8352). */
+    static String artKey(String token) {
+        if (token == null) return "";
+        if (token.startsWith("content://")) {
+            /* tree doc: separators are %2F (encoded '/'). the album folder is
+             * everything before the LAST %2F (which precedes the filename). */
+            int di = token.indexOf("/document/");
+            if (di >= 0) {
+                String id = token.substring(di + 10);
+                int last = id.lastIndexOf("%2F");
+                return "album:" + (last > 0 ? id.substring(0, last) : id);
+            }
+            return token;
+        }
+        /* plain path: parent folder is fine */
+        int i = token.lastIndexOf('/');
+        if (i <= 0) return token;
+        return token.substring(0, i);
+    }
+
     static java.io.File artFile(Context ctx, String token) {
         java.io.File d = new java.io.File(ctx.getFilesDir(), ART_DIR);
         d.mkdirs();
-        return new java.io.File(d, Long.toHexString(tokenHash(token)) + ".jpg");
+        return new java.io.File(d, Long.toHexString(tokenHash(artKey(token))) + ".jpg");
     }
 
     /** downscaled art from disk cache (fast, no SAF round-trip). */
@@ -151,17 +172,19 @@ public class LibraryCache {
         } catch (Exception e) { return null; }
     }
 
-    /** store a downscaled JPEG so the next launch doesn't re-read + re-decode */
+    /** store a downscaled JPEG so the next launch doesn't re-read + re-decode.
+     *  keyed per album; skips the write if a sibling already cached it. */
     public static void writeArt(Context ctx, String token, Bitmap bmp) {
         try {
+            java.io.File dst = artFile(ctx, token);
+            if (dst.exists()) return;
             java.io.File tmp = new java.io.File(
                     ctx.getFilesDir(), ART_DIR + "/.tmp.jpg");
             try (java.io.FileOutputStream out =
                          new java.io.FileOutputStream(tmp)) {
                 bmp.compress(Bitmap.CompressFormat.JPEG, 82, out);
             }
-            if (!tmp.renameTo(artFile(ctx, token))) {
-                java.io.File dst = artFile(ctx, token);
+            if (!tmp.renameTo(dst)) {
                 java.nio.file.Files.copy(tmp.toPath(), dst.toPath(),
                         java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                 tmp.delete();

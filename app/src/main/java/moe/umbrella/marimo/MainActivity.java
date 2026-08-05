@@ -12,6 +12,8 @@ import android.os.ParcelFileDescriptor;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.MotionEvent;
+import android.view.ViewConfiguration;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -64,6 +66,7 @@ public class MainActivity extends Activity {
     private moe.umbrella.marimo.WaveformSeekBar pSeek;
     private ImageButton pPlay;
     private ListView qList;
+    private int dragFrom = -1;
     private int tab = 0;   /* 0 library, 1 player, 2 queue */
     private Uri treeUri;
     private Album openAlbum;         // null = root (albums), else its tracks
@@ -154,6 +157,7 @@ public class MainActivity extends Activity {
                     .putExtra(PlaybackService.EXTRA_POS, pos));
             showNowPlaying(q.get(pos));
         });
+        setupQueueGestures();
 
         /* near-square screens (Titan 2 Elite 1080x1200) drop the big art
          * and the A-Z strip so the list/player get real room */
@@ -183,7 +187,6 @@ public class MainActivity extends Activity {
         findViewById(R.id.btn_settings).setOnClickListener(v -> showTab(3));
         findViewById(R.id.btn_settings_back).setOnClickListener(v -> showTab(0));
         findViewById(R.id.btn_settings_q).setOnClickListener(v -> showTab(3));
-        findViewById(R.id.btn_settings_p).setOnClickListener(v -> showTab(3));
         findViewById(R.id.set_pick).setOnClickListener(v -> {
             startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE),
                     REQ_PICK_TREE);
@@ -298,11 +301,9 @@ public class MainActivity extends Activity {
         Ui.tint(findViewById(R.id.btn_settings), 0);
         Ui.tint(findViewById(R.id.btn_settings_back), 0);
         Ui.panel(findViewById(R.id.btn_settings_q));
-        Ui.panel(findViewById(R.id.btn_settings_p));
         Ui.panel(findViewById(R.id.btn_scrobble_back));
         Ui.panel(findViewById(R.id.btn_scrobble_save));
         Ui.tint(findViewById(R.id.btn_settings_q), 0);
-        Ui.tint(findViewById(R.id.btn_settings_p), 0);
         Ui.tint(findViewById(R.id.eye_lf_key), 0);
         Ui.tint(findViewById(R.id.eye_lf_session), 0);
         Ui.tint(findViewById(R.id.eye_lb_token), 0);
@@ -361,13 +362,103 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** long-press to drag-reorder, horizontal swipe to remove */
+    private void setupQueueGestures() {
+        qList.setOnItemLongClickListener((p, v, pos, id) -> {
+            if (pos < 0 || pos >= PlaybackService.peekQueue().size()) return false;
+            dragFrom = pos;
+            v.startDragAndDrop(null, new View.DragShadowBuilder(v), pos, 0);
+            return true;
+        });
+        qList.setOnDragListener((v, ev) -> {
+            switch (ev.getAction()) {
+                case android.view.DragEvent.ACTION_DRAG_ENDED:
+                    dragFrom = -1;
+                    break;
+                case android.view.DragEvent.ACTION_DROP: {
+                    int over = qList.pointToPosition(
+                            Math.round(ev.getX()), Math.round(ev.getY()));
+                    if (dragFrom >= 0 && over >= 0)
+                        PlaybackService.reorderQueue(dragFrom, over);
+                    dragFrom = -1;
+                    refreshQueueList();
+                    break;
+                }
+                default:
+            }
+            return true;
+        });
+        qList.setOnTouchListener(new SwipeDismissTouchListener());
+    }
+
+    /** horizontal swipe on a row slides it off and removes it from the queue */
+    private class SwipeDismissTouchListener implements View.OnTouchListener {
+        private final int slop;
+        private View downView;
+        private float downX, downY, translateX, width;
+        private int downPos;
+        private boolean tracking;
+
+        SwipeDismissTouchListener() {
+            slop = ViewConfiguration.get(MainActivity.this).getScaledTouchSlop();
+        }
+
+        @Override public boolean onTouch(View v, MotionEvent e) {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN: {
+                    int pos = qList.pointToPosition(
+                            Math.round(e.getX()), Math.round(e.getY()));
+                    if (pos < 0 || pos >= PlaybackService.peekQueue().size()) return false;
+                    View child = qList.getChildAt(pos - qList.getFirstVisiblePosition());
+                    if (child == null) return false;
+                    downView = child; downX = e.getX(); downY = e.getY();
+                    downPos = pos; translateX = 0f; tracking = false;
+                    return false;   /* don't swallow; let click/longpress work */
+                }
+                case MotionEvent.ACTION_MOVE: {
+                    if (downView == null) return false;
+                    float dx = e.getX() - downX, dy = e.getY() - downY;
+                    if (!tracking && Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy))
+                        tracking = true;
+                    if (!tracking) return false;
+                    width = downView.getWidth();
+                    translateX = Math.max(-width, Math.min(0f, dx));
+                    downView.setTranslationX(translateX);
+                    downView.setAlpha(1f - 0.5f * (Math.abs(translateX) / width));
+                    return true;
+                }
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL: {
+                    if (downView == null) return false;
+                    if (tracking) {
+                        final View tv = downView;
+                        final int pos = downPos;
+                        if (Math.abs(translateX) > width * 0.35f) {
+                            tv.animate().translationX(-width).alpha(0f)
+                                    .setDuration(180).withEndAction(() -> {
+                                        PlaybackService.removeFromQueue(pos);
+                                        refreshQueueList();
+                                    }).start();
+                        } else {
+                            tv.animate().translationX(0f).alpha(1f)
+                                    .setDuration(150).start();
+                        }
+                        tracking = false;
+                    }
+                    downView = null;
+                    return tracking;
+                }
+                default: return false;
+            }
+        }
+    }
+
     private void toggleMask(android.widget.EditText et, ImageButton eye) {
         boolean masked = et.getTransformationMethod()
                 instanceof android.text.method.PasswordTransformationMethod;
         et.setTransformationMethod(masked ? null
                 : android.text.method.PasswordTransformationMethod.getInstance());
         et.setSelection(et.getText().length());
-        toast(masked ? "revealed" : "hidden");
     }
 
     private void populateScrobble() {

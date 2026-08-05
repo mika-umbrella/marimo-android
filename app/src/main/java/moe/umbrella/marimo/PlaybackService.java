@@ -45,6 +45,35 @@ public class PlaybackService extends MediaSessionService {
         saveQueue(null);
     }
 
+    /** drag-reorder: move the track at `from` to index `to`, keeping the live
+     *  ExoPlayer playlist, the static list and the persisted queue in sync */
+    public static void reorderQueue(int from, int to) {
+        PlaybackService s = instance;
+        synchronized (tracks) {
+            if (from < 0 || from >= tracks.size() || to < 0 || to >= tracks.size())
+                return;
+            Track t = tracks.remove(from);
+            tracks.add(to, t);
+        }
+        if (s != null && s.player != null && from != to)
+            s.player.moveMediaItem(from, to);
+        saveQueue(null);
+        if (s != null) s.postWidget();
+    }
+
+    /** swipe-remove: drop the track at `pos` from the queue entirely */
+    public static void removeFromQueue(int pos) {
+        PlaybackService s = instance;
+        synchronized (tracks) {
+            if (pos < 0 || pos >= tracks.size()) return;
+            tracks.remove(pos);
+        }
+        if (s != null && s.player != null)
+            s.player.removeMediaItem(pos);
+        saveQueue(null);
+        if (s != null) s.postWidget();
+    }
+
     /** queue memory: persists token list + current index to app files */
     private static volatile java.io.File queueFile;
     private static int savedCur = -1;

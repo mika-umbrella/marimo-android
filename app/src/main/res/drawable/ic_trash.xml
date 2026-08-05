@@ -1,0 +1,28 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+  <!-- feather "trash-2": lid + open can, stroke style -->
+  <path
+      android:pathData="M3,6H21"
+      android:strokeColor="#FFE8DDD0"
+      android:strokeWidth="1.7"
+      android:strokeLineCap="round"
+      android:strokeLineJoin="round"
+      android:fillColor="#00000000" />
+  <path
+      android:pathData="M8,6V4C8,3.45 8.45,3 9,3H15C15.55,3 16,3.45 16,4V6"
+      android:strokeColor="#FFE8DDD0"
+      android:strokeWidth="1.7"
+      android:strokeLineCap="round"
+      android:strokeLineJoin="round"
+      android:fillColor="#00000000" />
+  <path
+      android:pathData="M19,6L18.13,19.14C18.06,19.85 17.47,20.42 16.75,20.42H7.25C6.53,20.42 5.94,19.85 5.87,19.14L5,6"
+      android:strokeColor="#FFE8DDD0"
+      android:strokeWidth="1.7"
+      android:strokeLineCap="round"
+      android:strokeLineJoin="round"
+      android:fillColor="#00000000" />
+</vector>

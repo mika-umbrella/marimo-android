@@ -14,6 +14,9 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.MotionEvent;
 import android.view.ViewConfiguration;
+import android.graphics.drawable.LayerDrawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.Drawable;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -364,76 +367,95 @@ public class MainActivity extends Activity {
 
     /** long-press to drag-reorder, horizontal swipe to remove */
     private void setupQueueGestures() {
-        qList.setOnItemLongClickListener((p, v, pos, id) -> {
-            if (pos < 0 || pos >= PlaybackService.peekQueue().size()) return false;
-            dragFrom = pos;
-            v.startDragAndDrop(null, new View.DragShadowBuilder(v), pos, 0);
-            return true;
-        });
-        qList.setOnDragListener((v, ev) -> {
-            switch (ev.getAction()) {
-                case android.view.DragEvent.ACTION_DRAG_ENDED:
-                    dragFrom = -1;
-                    break;
-                case android.view.DragEvent.ACTION_DROP: {
-                    int over = qList.pointToPosition(
-                            Math.round(ev.getX()), Math.round(ev.getY()));
-                    if (dragFrom >= 0 && over >= 0)
-                        PlaybackService.reorderQueue(dragFrom, over);
-                    dragFrom = -1;
-                    refreshQueueList();
-                    break;
-                }
-                default:
-            }
-            return true;
-        });
-        qList.setOnTouchListener(new SwipeDismissTouchListener());
+        qList.setOnTouchListener(new QueueGestureListener());
     }
 
-    /** horizontal swipe on a row slides it off and removes it from the queue */
-    private class SwipeDismissTouchListener implements View.OnTouchListener {
-        private final int slop;
+    /** one gesture handler for the queue: long-press-hold drags a row to
+     *  reorder it IN PLACE (it stays in the list, the list reflows around it),
+     *  and a horizontal swipe reveals the trash icon and removes the row. */
+    private class QueueGestureListener implements View.OnTouchListener {
+        private static final int NONE = 0, SWIPE = 1, REORDER = 2;
+        private final int slop = ViewConfiguration.get(MainActivity.this).getScaledTouchSlop();
+        private final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        private Runnable longPress;
+        private final LayerDrawable reveal;
+
         private View downView;
         private float downX, downY, translateX, width;
-        private int downPos;
-        private boolean tracking;
+        private int downPos = -1, mode = NONE;
 
-        SwipeDismissTouchListener() {
-            slop = ViewConfiguration.get(MainActivity.this).getScaledTouchSlop();
+        QueueGestureListener() {
+            GradientDrawable red = new GradientDrawable();
+            red.setColor(0x33D32F2F);
+            red.setCornerRadius(dp(14));
+            reveal = new LayerDrawable(new Drawable[]{
+                    red, getResources().getDrawable(R.drawable.ic_trash)});
+            reveal.setLayerGravity(1, android.view.Gravity.RIGHT | android.view.Gravity.CENTER_VERTICAL);
+            reveal.setLayerInsetRight(1, dp(14));
+            reveal.setLayerInsetLeft(1, 2000);   /* keep the icon pinned to the right edge */
         }
 
         @Override public boolean onTouch(View v, MotionEvent e) {
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN: {
-                    int pos = qList.pointToPosition(
-                            Math.round(e.getX()), Math.round(e.getY()));
+                    int pos = qList.pointToPosition(Math.round(e.getX()), Math.round(e.getY()));
                     if (pos < 0 || pos >= PlaybackService.peekQueue().size()) return false;
                     View child = qList.getChildAt(pos - qList.getFirstVisiblePosition());
                     if (child == null) return false;
                     downView = child; downX = e.getX(); downY = e.getY();
-                    downPos = pos; translateX = 0f; tracking = false;
-                    return false;   /* don't swallow; let click/longpress work */
+                    downPos = pos; translateX = 0f; mode = NONE;
+                    longPress = () -> {
+                        if (mode == NONE && downView != null && downPos >= 0) {
+                            mode = REORDER;
+                            dragFrom = downPos;
+                            refreshQueueList();   /* highlights dragIndex row in place */
+                            downView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+                        }
+                    };
+                    h.postDelayed(longPress, ViewConfiguration.getLongPressTimeout());
+                    return false;   /* let tap/scroll work unless we take over */
                 }
                 case MotionEvent.ACTION_MOVE: {
-                    if (downView == null) return false;
                     float dx = e.getX() - downX, dy = e.getY() - downY;
-                    if (!tracking && Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy))
-                        tracking = true;
-                    if (!tracking) return false;
-                    width = downView.getWidth();
-                    translateX = Math.max(-width, Math.min(0f, dx));
-                    downView.setTranslationX(translateX);
-                    downView.setAlpha(1f - 0.5f * (Math.abs(translateX) / width));
-                    return true;
+                    if (mode == REORDER) {
+                        int over = qList.pointToPosition(Math.round(e.getX()), Math.round(e.getY()));
+                        int count = PlaybackService.peekQueue().size();
+                        if (over >= 0 && over < count && over != dragFrom) {
+                            PlaybackService.reorderQueue(dragFrom, over);
+                            dragFrom = over;
+                            refreshQueueList();
+                        }
+                        return true;
+                    }
+                    if (mode == NONE) {
+                        if (Math.abs(dx) > slop || Math.abs(dy) > slop)
+                            h.removeCallbacks(longPress);
+                        if (Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy))
+                            mode = SWIPE;          /* horizontal → remove */
+                        else if (Math.abs(dy) > slop)
+                            return false;          /* vertical → let ListView scroll */
+                    }
+                    if (mode == SWIPE && downView != null) {
+                        width = downView.getWidth();
+                        translateX = Math.max(-width, Math.min(0f, dx));
+                        downView.setTranslationX(translateX);
+                        downView.setAlpha(1f - 0.5f * (Math.abs(translateX) / width));
+                        if (downView.getBackground() != reveal)
+                            downView.setBackground(reveal);
+                        return true;
+                    }
+                    return false;
                 }
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL: {
-                    if (downView == null) return false;
-                    if (tracking) {
+                    h.removeCallbacks(longPress);
+                    if (mode == REORDER) {
+                        dragFrom = -1;
+                        refreshQueueList();   /* final state already persisted */
+                    } else if (mode == SWIPE && downView != null) {
                         final View tv = downView;
                         final int pos = downPos;
-                        if (Math.abs(translateX) > width * 0.35f) {
+                        if (Math.abs(translateX) > width * 0.4f) {
                             tv.animate().translationX(-width).alpha(0f)
                                     .setDuration(180).withEndAction(() -> {
                                         PlaybackService.removeFromQueue(pos);
@@ -442,14 +464,19 @@ public class MainActivity extends Activity {
                         } else {
                             tv.animate().translationX(0f).alpha(1f)
                                     .setDuration(150).start();
+                            tv.setBackground(null);
                         }
-                        tracking = false;
                     }
-                    downView = null;
-                    return tracking;
+                    boolean handled = mode == SWIPE || mode == REORDER;
+                    mode = NONE; downView = null; downPos = -1;
+                    return handled;
                 }
                 default: return false;
             }
+        }
+
+        private int dp(float d) {
+            return (int) (d * getResources().getDisplayMetrics().density + 0.5f);
         }
     }
 
@@ -790,6 +817,7 @@ public class MainActivity extends Activity {
 
     private void refreshQueueList() {
         List<Track> q = PlaybackService.peekQueue();
+        QueueAdapter.dragIndex = dragFrom;
         qList.setAdapter(new QueueAdapter(this, q));
     }
 

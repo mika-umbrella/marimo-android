@@ -12,6 +12,8 @@ import java.util.List;
 /** Queue list with small cover thumbs + playing marker, like the library. */
 public class QueueAdapter extends ArrayAdapter<Track> {
 
+    public static int dragIndex = -1;   /* row being drag-reordered (in place) */
+
     public QueueAdapter(MainActivity ctx, List<Track> tracks) {
         super(ctx, 0, tracks);
     }
@@ -35,6 +37,7 @@ public class QueueAdapter extends ArrayAdapter<Track> {
         sub.setText(t.artist);
         if (t.art != null) art.setImageBitmap(t.art);
         else art.setImageResource(android.R.drawable.ic_media_play);
+        convert.setBackgroundColor(pos == dragIndex ? Theme.rowSel() : 0x00000000);
         return convert;
     }
 }

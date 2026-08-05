@@ -4,3 +4,4 @@ build/
 core/core_selftest
 .gradle/
 local.properties
+*.apk

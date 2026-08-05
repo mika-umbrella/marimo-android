@@ -73,6 +73,9 @@ public class MainActivity extends Activity {
     private long animStart;
     private long lastPlayMs;
     private final List<Album> albums = new ArrayList<>();
+    /* in-memory token -> Track map of the last cache load, so an incremental
+     * rescan doesn't re-parse library.dat from disk every time (the crawl) */
+    private final HashMap<String, Track> knownTracks = new HashMap<>();
     private AlbumAdapter adapter;
     private TextView status, folderName;
     private LinearLayout screenLibrary, screenPlayer, screenQueue, screenSettings, screenScrobble;
@@ -309,6 +312,8 @@ public class MainActivity extends Activity {
         List<Album> cached = LibraryCache.load(this);
         if (!cached.isEmpty()) {
             albums.addAll(cached);
+            for (Album ca : cached)
+                for (Track ct : ca.tracks) knownTracks.put(ct.token, ct);
             buildEntries();
             adapter.notifyDataSetChanged();
             status.setText(albums.size() + " albums · "
@@ -666,10 +671,10 @@ public class MainActivity extends Activity {
     private void rescan() {
         new Thread(() -> {
             /* incremental: remember what we already know so rescans only read
-             * tags/art for genuinely new tracks (the cache is authoritative) */
-            HashMap<String, Track> known = new HashMap<>();
-            for (Album k : LibraryCache.load(this))
-                for (Track kt : k.tracks) known.put(kt.token, kt);
+             * tags/art for genuinely new tracks — built in memory (no disk
+             * re-parse of library.dat), so the crawl stays fast. */
+            HashMap<String, Track> known;
+            synchronized (knownTracks) { known = new HashMap<>(knownTracks); }
 
             albums.clear();
             openAlbum = null;
@@ -767,6 +772,13 @@ public class MainActivity extends Activity {
             }
             Collections.sort(albums, (a, b) ->
                     a.folder.compareToIgnoreCase(b.folder));
+            /* refresh the in-memory map so the next incremental rescan reuses
+             * what we just scanned (incl. brand-new tracks) — no disk re-read */
+            synchronized (knownTracks) {
+                knownTracks.clear();
+                for (Album a : albums)
+                    for (Track t : a.tracks) knownTracks.put(t.token, t);
+            }
             LibraryCache.save(this, albums);
             runOnUiThread(() -> {
                 buildEntries();

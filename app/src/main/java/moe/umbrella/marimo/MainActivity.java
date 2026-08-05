@@ -50,7 +50,12 @@ public class MainActivity extends Activity {
     private final Runnable bgTick = new Runnable() {
         @Override public void run() {
             if (bgWorker == null) return;
-            float t = (System.currentTimeMillis() - animStart) / 1000f;
+            /* freeze the drift when nothing is playing: time only advances
+             * while music is playing, so the art bg holds still when
+             * paused/stopped and drifts again on resume */
+            if (PlaybackService.isPlaying())
+                lastPlayMs = System.currentTimeMillis();
+            float t = (lastPlayMs - animStart) / 1000f;
             final android.graphics.drawable.Drawable d =
                     BgManager.gradientFor(MainActivity.this, currentArt, Theme.scrim(), t);
             ui.post(() -> { if (rootView != null) rootView.setBackground(d); });
@@ -59,6 +64,7 @@ public class MainActivity extends Activity {
     };
     private static final long BG_INTERVAL_MS = 50;
     private long animStart;
+    private long lastPlayMs;
     private final List<Album> albums = new ArrayList<>();
     private AlbumAdapter adapter;
     private TextView status, folderName;

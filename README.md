@@ -1,65 +1,46 @@
-# marimo-android
+# marimo · android <img src="screens/icon.png" width="64" align="right" />
 
-the android port of [marimo](https://github.com/mika-umbrella/marimo) — a
-tiny retro pixel music player (C11, SDL2, libmpv). **local repo, not
-published.** the port strategy: keep the C core, rebuild the UI layer.
+A tiny retro green pixel music player — the **[mikaplay](https://github.com/mika-umbrella)** desktop marimo, ported to Android.
 
-## status
+<p>
+  <img src="screens/lib.png" width="220" />
+  <img src="screens/player.png" width="220" />
+  <img src="screens/queue.png" width="220" />
+  <img src="screens/settings.png" width="220" />
+</p>
 
-- [x] **M0 — portable core extracted + proven** (`core/`): tags.c (FLAC/MP3
-      ID3v2, now with fd variants for SAF), queue.c, md5.c, cJSON.c, fs.c.
-      Zero SDL/mpv/UI deps; builds with `gcc -std=c11 -Wall -Wextra -pedantic`.
-      `core/core_selftest.c` passes on the real library (md5 vectors, queue
-      logic, japanese-path fs, tags via path AND fd agreeing).
-- [x] **JNI contract sketched** (`android/core_api.h`): flat buffers + opaque
-      handles only — no structs across the boundary.
-- [x] **App skeleton sketched** (`android/MainActivity.kt`): SAF tree picker,
-      fd-based tag indexing, MediaSession callback, foreground service.
-- [x] **M1 — toolchain** — SDK + NDK r29 installed (~/android-sdk), licenses accepted
-- [x] **M2 — on-device core selftest** — NDK-built x86_64 binary ran on waydroid: md5/queue/fs/tags all green, japanese-named flac parsed via bionic (fd + path variants)
-- [x] **M3 — app with JNI core** — gradle app (AGP 8.7.3, gradle 8.14.3, JDK 21
-      via temurin tarball): SAF tree walk → fd tags, app-private path tags
-      (tagReadPath), C queue exposed, on-screen JNI selftest
-- [x] **M4 — playback** — MediaPlayer service + MediaSession (lockscreen/BT
-      keys) + foreground notification. mpv-android stays the future upgrade
-      for true gapless
-- [x] **M5 — touch UI** — bottom tabs (player/library), player screen with
-      big art + title/artist/album + 64dp transport, 64dp track rows with
-      cover thumbs. embedded art extraction is now a CORE feature (FLAC
-      picture blocks + ID3 APIC) since MediaPlayer doesn't hand over art.
-      the pixel marimo face (unifont UI) is the remaining dream
-- [ ] M6 — scrobbling: core/scrobble.c + libcurl for android, or the app does
-      HTTP in kotlin
+## what it does
 
-## what survives, what doesn't
-
-survives as-is: tags, queue, md5, cJSON, fs, config format (rewritten to
-SharedPreferences), scrobble payload logic, the winamp soul.
-
-dies or gets rebuilt: the pixel UI (touch targets), path-based browsing
-(SAF/MediaStore instead), dirent shim (obsolete — no paths at all),
-MPRIS/global hotkeys (→ MediaSession + bluetooth keys, strictly better),
-fixed 480x640 landscape layout (phones want portrait).
+- **art-drift background** — the window's backdrop is a tileable perlin field sampled from whichever album is playing, drifting gently while music plays and holding still when it's quiet
+- **light & dark themes** — translucent panels, a toggle in settings, everything follows
+- **gapless playback** — ExoPlayer runs track-to-track without a gap, so continuous albums (DJ mixes, live sets) flow straight through
+- **real waveform** — decoded per track and cached to disk (~104 bytes each), so it pops in instantly on repeat listens
+- **queue** — press-and-hold to drag-reorder, swipe away to remove, and it survives restarts (with album covers, no less)
+- **scrobbling** — last.fm (with an interactive browser login — no hunting for session keys) + ListenBrainz, same rules as desktop (≥50% or ≥4 min)
+- **folder covers** — embedded art, or `cover.jpg`/`folder.jpg` in the album folder
 
 ## building
 
-core (works here):
+```bash
+# 1. build the C core (a VPATH + NDK cross-compile lands a .so per ABI):
+cd android && make            # needs the NDK at ~/android-sdk/ndk
+cd ..
+# 2. build the APK:
+JAVA_HOME=$HOME/jdk21 ~/gradle-dl/gradle-8.14.3/bin/gradle assembleDebug --no-daemon
+# apk → app/build/outputs/apk/debug/app-debug.apk
 
-```sh
-cd core
-gcc -std=c11 -Wall -Wextra -pedantic -O2 -o core_selftest *.c
-./core_selftest            # or: ./core_selftest /path/to/music
-ar rcs libmarimo_core.a *.o   # static lib for the JNI shim
+# 3. install:
+adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-android (needs the SDK/NDK — big download, nova's call when she wants M1):
+Requires **Android 7+** (minSdk 24), Java 17, Gradle 8.14, AGP 8.7. The APK ships both `armeabi-v7a`/`arm64-v8a` and `x86_64` cores, so it runs on real phones **and** x86 emulators/waydroid.
 
-- Android Studio (SDK + NDK + gradle + kotlin)
-- mpv for android: build audio-only libmpv via the
-  [mpv-android](https://github.com/mpv-android/mpv-android) build tree
-  (FFmpeg + opensl/aaudio out; marimo already runs mpv with `vo=null`)
-- curl for android (scrobbling), or plain kotlin HTTP
+## notes
 
-## license
+- pick your music folder from **Settings → Pick music folder** (SAF tree grant).
+- adb-pushed audio on emulators/waydroid can be missed by the media provider — marimo falls back to reading those files by path, so freshly sideloaded albums still get tags + art + playback.
+- scrobble in **Settings → scrobble** — the last.fm login opens the authorize page in your browser and returns silently.
 
-GPL-3.0, same as marimo (this is derived code; see LICENSE).
+---
+
+made by [mika](https://github.com/mika-umbrella) for nova :3

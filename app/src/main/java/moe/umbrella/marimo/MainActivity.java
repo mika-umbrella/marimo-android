@@ -181,14 +181,11 @@ public class MainActivity extends Activity {
                     .setAction(PlaybackService.ACTION_REPEAT));
             updatePlayerUi();
         });
+        /* storage is entirely folder-scoped via the SAF tree (ACTION_OPEN_DOCUMENT_TREE),
+         * so no broad READ_MEDIA_* permission is requested at all. */
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             requestPermissions(new String[]{
-                    android.Manifest.permission.READ_MEDIA_AUDIO,
-                    android.Manifest.permission.READ_MEDIA_IMAGES,
                     android.Manifest.permission.POST_NOTIFICATIONS}, 1);
-        } else {
-            requestPermissions(new String[]{
-                    android.Manifest.permission.READ_EXTERNAL_STORAGE}, 1);
         }
         qList = findViewById(R.id.q_list);
         qList.setOnItemClickListener((p, v, pos, id) -> {
@@ -310,7 +307,7 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             List<Track> q = PlaybackService.peekQueue();
             for (Track t : q)
-                if (t.art == null) t.art = loadArt(t.token);
+                if (t.art == null) t.art = loadArt(t.token, null);
             runOnUiThread(this::refreshQueueList);
         }).start();
     }
@@ -711,7 +708,7 @@ public class MainActivity extends Activity {
                     for (File t : ts)
                         if (t.isFile() && isAudio(t.getName())) {
                             Track tr = new Track(t.getAbsolutePath(), t.getName());
-                            readTags(tr);
+                            readTags(tr, null);
                             if (a.coverIdx < 0 && tr.art != null) a.coverIdx = a.tracks.size();
                             a.tracks.add(tr);
                         }
@@ -720,7 +717,7 @@ public class MainActivity extends Activity {
             } else if (f.isFile() && isAudio(f.getName())) {
                 Album loose = new Album("(loose files)");
                 Track tr = new Track(f.getAbsolutePath(), f.getName());
-                readTags(tr);
+                readTags(tr, null);
                 if (loose.coverIdx < 0 && tr.art != null) loose.coverIdx = 0;
                 loose.tracks.add(tr);
                 addAlbum(loose);
@@ -735,7 +732,7 @@ public class MainActivity extends Activity {
                 for (DocumentFile t : f.listFiles())
                     if (t.isFile() && isAudio(t.getName())) {
                         Track tr = new Track(t.getUri().toString(), t.getName());
-                        readTags(tr);
+                        readTags(tr, f);
                         if (a.coverIdx < 0 && tr.art != null) a.coverIdx = a.tracks.size();
                         a.tracks.add(tr);
                     }
@@ -744,7 +741,7 @@ public class MainActivity extends Activity {
             } else if (f.isFile() && isAudio(f.getName())) {
                 Album loose = new Album("(loose files)");
                 Track tr = new Track(f.getUri().toString(), f.getName());
-                readTags(tr);
+                readTags(tr, dir);
                 if (loose.coverIdx < 0 && tr.art != null) loose.coverIdx = 0;
                 loose.tracks.add(tr);
                 addAlbum(loose);
@@ -752,23 +749,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** map an externalstorage content:// tree doc back to a real path —
-     *  waydroid's provider can't open files it never indexed into MediaStore,
-     *  so we fall back to reading /storage/emulated/0/... directly (the app
-     *  holds READ_MEDIA_AUDIO/READ_EXTERNAL_STORAGE for exactly this). */
-    private String contentPath(String token) {
-        try {
-            if (!token.startsWith("content://")) return null;
-            String p = Uri.parse(token).getPath();
-            int i = p == null ? -1 : p.indexOf("/document/");
-            if (i < 0) return null;
-            String id = Uri.decode(p.substring(i + 10));
-            if (!id.startsWith("primary:")) return null;
-            return "/storage/emulated/0/" + id.substring("primary:".length());
-        } catch (Exception e) { return null; }
-    }
-
-    private void readTags(Track t) {
+    private void readTags(Track t, DocumentFile albumDir) {
         try {
             byte[] title = new byte[512], artist = new byte[512], album = new byte[512];
             int[] dur = new int[1], tr = new int[1], dc = new int[1];
@@ -782,16 +763,10 @@ public class MainActivity extends Activity {
                         rc = NativeBridge.tagReadFd(pfd.detachFd(),
                                 title, artist, album, dur, tr, dc);
                 } catch (Exception e) {
-                    /* provider threw (unindexed file) -> direct path below */
+                    /* provider failed -> tags stay at raw filename */
                 } finally {
                     if (pfd != null)
                         try { pfd.close(); } catch (Exception ignore) { }
-                }
-                if (rc != 0) {                 /* fall back to real path */
-                    String path = contentPath(t.token);
-                    if (path != null)
-                        rc = NativeBridge.tagReadPath(path,
-                                title, artist, album, dur, tr, dc);
                 }
             } else {
                 rc = NativeBridge.tagReadPath(t.token,
@@ -805,15 +780,34 @@ public class MainActivity extends Activity {
                 t.track = tr[0];
                 t.disc = dc[0];
             }
-            t.art = loadArt(t.token);
+            t.art = loadArt(t.token, albumDir);
         } catch (Exception e) {
             android.util.Log.e("marimo", "readTags failed: " + t.token, e);
         }
     }
 
     /** read cover.jpg/folder.jpg/front.jpg from the audio file's folder —
-     *  used when a track has no embedded art. */
-    private byte[] folderCover(String audioPath) {
+     *  used when a track has no embedded art. folder covers inside the picked
+     *  SAF tree are read via ContentResolver, so no image permission is needed. */
+    private byte[] treeFolderCover(DocumentFile dir) {
+        try {
+            if (dir == null) return null;
+            String[] names = {"cover.jpg", "folder.jpg", "front.jpg",
+                              "cover.png", "folder.png", "front.png"};
+            for (String n : names) {
+                DocumentFile c = dir.findFile(n);
+                if (c != null && c.exists() && c.isFile()) {
+                    java.io.InputStream in = getContentResolver()
+                            .openInputStream(c.getUri());
+                    return readAll(in);
+                }
+            }
+        } catch (Exception e) { }
+        return null;
+    }
+
+    /** read cover.jpg/... from an app-private folder (needs no permission). */
+    private byte[] folderCoverPath(String audioPath) {
         try {
             java.io.File dir = new java.io.File(audioPath).getParentFile();
             if (dir == null) return null;
@@ -838,7 +832,18 @@ public class MainActivity extends Activity {
         return null;
     }
 
-    private Bitmap loadArt(String token) {
+    private byte[] readAll(java.io.InputStream in) {
+        try {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int r;
+            while ((r = in.read(buf)) > 0) out.write(buf, 0, r);
+            in.close();
+            return out.toByteArray();
+        } catch (Exception e) { return null; }
+    }
+
+    private Bitmap loadArt(String token, DocumentFile albumDir) {
         try {
             byte[] raw = null;
             if (token.startsWith("content://")) {
@@ -849,17 +854,11 @@ public class MainActivity extends Activity {
                         try { raw = NativeBridge.embeddedArtFd(pfd.detachFd()); }
                         finally { try { pfd.close(); } catch (Exception ignore) { } }
                     }
-                } catch (Exception e) { /* fall to path */ }
-                if (raw == null) {                 /* unindexed-file fallback */
-                    String path = contentPath(token);
-                    if (path != null) {
-                        raw = NativeBridge.embeddedArtPath(path);
-                        if (raw == null) raw = folderCover(path);
-                    }
-                }
+                } catch (Exception e) { /* provider failed */ }
+                if (raw == null) raw = treeFolderCover(albumDir);
             } else {
                 raw = NativeBridge.embeddedArtPath(token);
-                if (raw == null) raw = folderCover(token);
+                if (raw == null) raw = folderCoverPath(token);
             }
             if (raw == null || raw.length == 0) return null;
             return BitmapFactory.decodeByteArray(raw, 0, raw.length);

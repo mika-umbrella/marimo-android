@@ -312,23 +312,11 @@ public class PlaybackService extends MediaSessionService {
     public static long duration() { return durationMs; }
     public static int shuffle() { return shuffle; }
     public static int repeat() { return repeat; }
-    /** waydroid's provider can't serve files it never indexed, so map the
-     *  content:// tree doc to a real path (ExoPlayer then reads it directly
-     *  via FileDataSource, using our READ_MEDIA_AUDIO). falls back to content.
-     */
+    /** build the media URI ExoPlayer plays. everything is folder-scoped via
+     *  the SAF tree, so the content:// token is used directly (ExoPlayer's
+     *  ContentDataSource reads it through our persisted tree grant). */
     private static Uri playUri(String token) {
-        if (token == null || !token.startsWith("content://")) return Uri.parse(token);
-        try {
-            String p = Uri.parse(token).getPath();
-            int i = p == null ? -1 : p.indexOf("/document/");
-            if (i >= 0) {
-                String id = android.net.Uri.decode(p.substring(i + 10));
-                if (id.startsWith("primary:"))
-                    return Uri.fromFile(new java.io.File(
-                            "/storage/emulated/0/" + id.substring("primary:".length())));
-            }
-        } catch (Exception e) { }
-        return Uri.parse(token);
+        return token == null ? null : Uri.parse(token);
     }
 
     public static int currentIndex() {

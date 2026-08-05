@@ -32,7 +32,8 @@ public class QueueAdapter extends ArrayAdapter<Track> {
         sub.setTextColor(Theme.dim());
         int cur = PlaybackService.currentIndex();
         String name = t.title.isEmpty() ? t.name : t.title;
-        title.setText((pos == cur ? "▶ " : "") + String.format("%02d", pos + 1)
+        int num = t.track > 0 ? t.track : (pos + 1);   /* album track no, else queue idx */
+        title.setText((pos == cur ? "▶ " : "") + String.format("%02d", num)
                 + ".  " + name);
         sub.setText(t.artist);
         if (t.art != null) art.setImageBitmap(t.art);

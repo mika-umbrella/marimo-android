@@ -387,7 +387,7 @@ public class MainActivity extends Activity {
         QueueGestureListener() {
             GradientDrawable red = new GradientDrawable();
             red.setColor(0x33D32F2F);
-            red.setCornerRadius(dp(14));
+            red.setCornerRadius(0);   /* rectangular, matches the row */
             reveal = new LayerDrawable(new Drawable[]{
                     red, getResources().getDrawable(R.drawable.ic_trash)});
             reveal.setLayerGravity(1, android.view.Gravity.RIGHT | android.view.Gravity.CENTER_VERTICAL);

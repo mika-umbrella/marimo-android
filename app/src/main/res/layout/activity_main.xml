@@ -425,6 +425,8 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
                 android:gravity="center"
+                android:maxLines="1"
+                android:ellipsize="end"
                 android:textSize="18sp"
                 android:textColor="#e8ddd0"
                 android:textStyle="bold" />
@@ -434,6 +436,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center"
+                android:maxLines="1"
+                android:ellipsize="end"
                 android:textSize="14sp"
                 android:textColor="#c9c9d1" />
 
@@ -442,6 +446,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center"
+                android:maxLines="1"
+                android:ellipsize="end"
                 android:textSize="13sp"
                 android:textColor="#6b6b76" />
 

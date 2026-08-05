@@ -140,6 +140,11 @@ public class MainActivity extends Activity {
         pTime = findViewById(R.id.p_time);
         pArt = findViewById(R.id.p_art);
         pSeek = findViewById(R.id.p_seek);
+        /* long titles scroll sideways (marquee) instead of wrapping */
+        ((TextView) findViewById(R.id.p_track)).setHorizontallyScrolling(true);
+        ((TextView) findViewById(R.id.p_track)).setSelected(true);
+        ((TextView) findViewById(R.id.p_album)).setHorizontallyScrolling(true);
+        ((TextView) findViewById(R.id.p_album)).setSelected(true);
         pPlay = findViewById(R.id.p_play);
         ImageButton pShuffle = findViewById(R.id.p_shuffle);
         ImageButton pRepeat = findViewById(R.id.p_repeat);

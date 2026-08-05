@@ -78,7 +78,9 @@ public class Album {
             if (m.find()) {
                 year = Integer.parseInt(m.group(1));
                 name = (name.substring(0, m.start())
-                        + " " + name.substring(m.end())).trim();
+                        + " " + name.substring(m.end()))
+                        .replaceAll("^\\s*-\\s*|\\s*-\\s*$", "")
+                        .trim();
             }
         }
         album = name.isEmpty() ? folder : name;

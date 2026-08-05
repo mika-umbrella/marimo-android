@@ -20,10 +20,14 @@ public class LetterBar extends View {
 
     public LetterBar(Context c, AttributeSet a) {
         super(c, a);
-        text.setColor(0xFF6B6B76);
         text.setTextSize(17f);
         text.setTextAlign(Paint.Align.CENTER);
-        highlight.setColor(0xFF1E1E23);
+        applyTheme();
+    }
+
+    public void applyTheme() {
+        highlight.setColor(Theme.rowSel());
+        invalidate();
     }
 
     public void setListener(Listener l) { listener = l; }
@@ -48,9 +52,9 @@ public class LetterBar extends View {
             int y = slot * i + (slot / 2) + (int) (text.getTextSize() / 3f);
             if (i == hover) {
                 canvas.drawRect(0, slot * i, getWidth(), slot * i + slot, highlight);
-                text.setColor(0xFFC9C9D1);
+                text.setColor(Theme.sub());
             } else {
-                text.setColor(0xFF6B6B76);
+                text.setColor(Theme.dim());
             }
             canvas.drawText(String.valueOf(LETTERS.charAt(i)), getWidth() / 2f, y, text);
         }

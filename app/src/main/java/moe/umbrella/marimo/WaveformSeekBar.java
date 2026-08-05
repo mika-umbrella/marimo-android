@@ -33,12 +33,17 @@ public class WaveformSeekBar extends View {
 
     public WaveformSeekBar(Context c, AttributeSet a) {
         super(c, a);
-        played.setColor(0xFF7DFF7D);
-        rest.setColor(0xFF2A2A30);
-        line.setColor(0xFF6B6B76);
-        dot.setColor(0xFF7DFF7D);
+        applyTheme();
         heights = new int[N_BARS];
         for (int i = 0; i < N_BARS; i++) heights[i] = 4;   /* silent baseline */
+    }
+
+    public void applyTheme() {
+        played.setColor(Theme.acc());
+        rest.setColor(Theme.dim());
+        line.setColor(Theme.dim());
+        dot.setColor(Theme.acc());
+        invalidate();
     }
 
     public void setListener(Listener l) { listener = l; }

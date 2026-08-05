@@ -36,11 +36,29 @@ public class MainActivity extends Activity {
     private static final int REQ_PICK_TREE = 7;
     private static final String PREFS = "marimo", KEY_TREE = "tree_uri";
 
+    private android.widget.LinearLayout rootView, tabBar;
+    private android.content.SharedPreferences prefs;
     private final List<Object> entries = new ArrayList<>();
+    private android.os.HandlerThread bgThread;
+    private android.os.Handler bgWorker;
+    private final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable bgTick = new Runnable() {
+        @Override public void run() {
+            if (bgWorker == null) return;
+            float t = (System.currentTimeMillis() - animStart) / 1000f;
+            final android.graphics.drawable.Drawable d =
+                    BgManager.gradientFor(MainActivity.this, currentArt, Theme.scrim(), t);
+            ui.post(() -> { if (rootView != null) rootView.setBackground(d); });
+            bgWorker.postDelayed(this, BG_INTERVAL_MS);
+        }
+    };
+    private static final long BG_INTERVAL_MS = 50;
+    private long animStart;
     private final List<Album> albums = new ArrayList<>();
     private AlbumAdapter adapter;
     private TextView status, folderName;
-    private LinearLayout screenLibrary, screenPlayer, screenQueue, screenSettings;
+    private LinearLayout screenLibrary, screenPlayer, screenQueue, screenSettings, screenScrobble;
+    private android.widget.EditText etLfKey, etLfSession, etLbToken;
     private TextView pTrack, pArtist, pAlbum, pTime;
     private ImageView pArt;
     private moe.umbrella.marimo.WaveformSeekBar pSeek;
@@ -91,12 +109,18 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        rootView = findViewById(R.id.root);
+        tabBar = findViewById(R.id.tab_bar);
         status = findViewById(R.id.status);
         folderName = findViewById(R.id.folder_name);
         screenLibrary = findViewById(R.id.screen_library);
         screenPlayer = findViewById(R.id.screen_player);
         screenQueue = findViewById(R.id.screen_queue);
         screenSettings = findViewById(R.id.screen_settings);
+        screenScrobble = findViewById(R.id.screen_scrobble);
+        etLfKey = findViewById(R.id.et_lf_key);
+        etLfSession = findViewById(R.id.et_lf_session);
+        etLbToken = findViewById(R.id.et_lb_token);
         pTrack = findViewById(R.id.p_track);
         pArtist = findViewById(R.id.p_artist);
         pAlbum = findViewById(R.id.p_album);
@@ -158,12 +182,26 @@ public class MainActivity extends Activity {
 
         findViewById(R.id.btn_settings).setOnClickListener(v -> showTab(3));
         findViewById(R.id.btn_settings_back).setOnClickListener(v -> showTab(0));
+        findViewById(R.id.btn_settings_q).setOnClickListener(v -> showTab(3));
+        findViewById(R.id.btn_settings_p).setOnClickListener(v -> showTab(3));
         findViewById(R.id.set_pick).setOnClickListener(v -> {
             startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE),
                     REQ_PICK_TREE);
         });
         findViewById(R.id.set_rescan).setOnClickListener(v -> rescan());
-        findViewById(R.id.set_scrobble).setOnClickListener(v -> showScrobbleSettings());
+        findViewById(R.id.set_scrobble).setOnClickListener(v -> showTab(4));
+        findViewById(R.id.btn_scrobble_back).setOnClickListener(v -> showTab(3));
+        findViewById(R.id.eye_lf_key).setOnClickListener(v -> toggleMask(etLfKey, findViewById(R.id.eye_lf_key)));
+        findViewById(R.id.eye_lf_session).setOnClickListener(v -> toggleMask(etLfSession, findViewById(R.id.eye_lf_session)));
+        findViewById(R.id.eye_lb_token).setOnClickListener(v -> toggleMask(etLbToken, findViewById(R.id.eye_lb_token)));
+        findViewById(R.id.btn_scrobble_save).setOnClickListener(v -> saveScrobble());
+        findViewById(R.id.set_theme).setOnClickListener(v -> {
+            Theme.dark = !Theme.dark;
+            prefs.edit().putBoolean("dark", Theme.dark).apply();
+            ((Button) findViewById(R.id.set_theme))
+                    .setText("dark theme: " + (Theme.dark ? "on" : "off"));
+            repaintBg(currentArt);
+        });
         findViewById(R.id.btn_up).setOnClickListener(v -> goRoot());
         findViewById(R.id.letterbar).setOnTouchListener(null);
         ((moe.umbrella.marimo.LetterBar) findViewById(R.id.letterbar))
@@ -196,12 +234,15 @@ public class MainActivity extends Activity {
         });
         findViewById(R.id.tab_player).setOnClickListener(v -> showTab(1));
 
-        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         Scrobbler.configure(prefs.getString("lf_key", ""),
                 prefs.getString("lf_secret", ""),
                 prefs.getString("lf_session", ""),
                 prefs.getString("lf_user", ""),
                 prefs.getString("lb_token", ""));
+        applyTheme();
+        startBgLoop();
+
         String saved = prefs.getString(KEY_TREE, null);
         if (saved != null) {
             try {
@@ -219,12 +260,143 @@ public class MainActivity extends Activity {
         handler.post(uiTick);
     }
 
+    private Bitmap currentArt;
+
+    /** paint the art-gradient background + restyle every surface */
+    private void applyTheme() {
+        repaintBg(currentArt);
+    }
+
+    /** after a track's art loads, repaint the gradient from it */
+    private void repaintBg(Bitmap art) {
+        currentArt = art;              /* the bg loop reads this each tick */
+        restyleSurfaces();
+    }
+
+    private void restyleSurfaces() {
+        tabBar.setBackgroundColor(Theme.tabBar());
+        android.graphics.drawable.GradientDrawable sep =
+                new android.graphics.drawable.GradientDrawable();
+        sep.setColor(Theme.tabSep());
+        sep.setSize((int)(2 * getResources().getDisplayMetrics().density + 0.5f), 1);
+        tabBar.setDividerDrawable(sep);
+        tabBar.setShowDividers(android.widget.LinearLayout.SHOW_DIVIDER_MIDDLE);
+        Button themeBtn = findViewById(R.id.set_theme);
+        if (themeBtn != null)
+            themeBtn.setText("dark theme: " + (Theme.dark ? "on" : "off"));
+        Ui.tab(findViewById(R.id.tab_queue));
+        Ui.tab(findViewById(R.id.tab_player));
+        Ui.tab(findViewById(R.id.tab_library));
+        Ui.panel(findViewById(R.id.btn_up));
+        Ui.panel(findViewById(R.id.btn_settings));
+        Ui.panel(findViewById(R.id.set_pick));
+        Ui.panel(findViewById(R.id.set_rescan));
+        Ui.panel(findViewById(R.id.set_scrobble));
+        Ui.panel(findViewById(R.id.set_theme));
+        Ui.panel(findViewById(R.id.btn_settings_back));
+        Ui.tint(findViewById(R.id.btn_up), 0);
+        Ui.tint(findViewById(R.id.btn_settings), 0);
+        Ui.tint(findViewById(R.id.btn_settings_back), 0);
+        Ui.panel(findViewById(R.id.btn_settings_q));
+        Ui.panel(findViewById(R.id.btn_settings_p));
+        Ui.panel(findViewById(R.id.btn_scrobble_back));
+        Ui.panel(findViewById(R.id.btn_scrobble_save));
+        Ui.tint(findViewById(R.id.btn_settings_q), 0);
+        Ui.tint(findViewById(R.id.btn_settings_p), 0);
+        Ui.tint(findViewById(R.id.eye_lf_key), 0);
+        Ui.tint(findViewById(R.id.eye_lf_session), 0);
+        Ui.tint(findViewById(R.id.eye_lb_token), 0);
+        Ui.text(findViewById(R.id.title_scrobble), 2);
+        Ui.text(findViewById(R.id.folder_name), 1);
+        Ui.text(findViewById(R.id.status), 1);
+        Ui.text(findViewById(R.id.set_pick), 0);
+        Ui.text(findViewById(R.id.set_rescan), 0);
+        Ui.text(findViewById(R.id.set_scrobble), 0);
+        Ui.text(findViewById(R.id.set_theme), 0);
+        Ui.press(findViewById(R.id.p_play));
+        Ui.press(findViewById(R.id.p_prev));
+        Ui.press(findViewById(R.id.p_next));
+        Ui.press(findViewById(R.id.p_shuffle));
+        Ui.press(findViewById(R.id.p_repeat));
+        ((moe.umbrella.marimo.LetterBar) findViewById(R.id.letterbar)).applyTheme();
+        ((moe.umbrella.marimo.WaveformSeekBar) findViewById(R.id.p_seek)).applyTheme();
+        Ui.text(findViewById(R.id.p_track), 0);
+        Ui.text(findViewById(R.id.p_artist), 2);
+        Ui.text(findViewById(R.id.p_album), 1);
+        Ui.text(findViewById(R.id.p_time), 1);
+        Ui.tint(findViewById(R.id.p_play), 0);
+        Ui.tint(findViewById(R.id.p_prev), 0);
+        Ui.tint(findViewById(R.id.p_next), 0);
+        Ui.tint(findViewById(R.id.p_shuffle), 0);
+        Ui.tint(findViewById(R.id.p_repeat), 0);
+        ((TextView) findViewById(R.id.title)).setTextColor(Theme.acc());
+        ((TextView) findViewById(R.id.p_title)).setTextColor(Theme.acc());
+        TextView tq = findViewById(R.id.title_queue);
+        if (tq != null) tq.setTextColor(Theme.acc());
+        TextView ts = findViewById(R.id.title_settings);
+        if (ts != null) ts.setTextColor(Theme.acc());
+        adapter.notifyDataSetChanged();
+    }
+
+    @Override
+    protected void onStart() { super.onStart(); startBgLoop(); }
+
+    @Override
+    protected void onStop() { super.onStop(); stopBgLoop(); }
+
+    private void startBgLoop() {
+        if (bgWorker != null) return;
+        bgThread = new android.os.HandlerThread("bgperlin");
+        bgThread.start();
+        bgWorker = new android.os.Handler(bgThread.getLooper());
+        animStart = System.currentTimeMillis();
+        bgWorker.post(bgTick);
+    }
+
+    private void stopBgLoop() {
+        if (bgThread != null) {
+            bgThread.quitSafely();
+            bgThread = null;
+            bgWorker = null;
+        }
+    }
+
+    private void toggleMask(android.widget.EditText et, ImageButton eye) {
+        boolean masked = et.getTransformationMethod()
+                instanceof android.text.method.PasswordTransformationMethod;
+        et.setTransformationMethod(masked ? null
+                : android.text.method.PasswordTransformationMethod.getInstance());
+        et.setSelection(et.getText().length());
+        toast(masked ? "revealed" : "hidden");
+    }
+
+    private void populateScrobble() {
+        String[] cur = Scrobbler.current();
+        etLfKey.setText(cur[0]);
+        etLfSession.setText(cur[2]);
+        etLbToken.setText(cur[4]);
+    }
+
+    private void saveScrobble() {
+        String[] cur = Scrobbler.current();
+        String k = etLfKey.getText().toString().trim();
+        String s = etLfSession.getText().toString().trim();
+        String t = etLbToken.getText().toString().trim();
+        Scrobbler.configure(k, cur[1], s, cur[3], t);
+        prefs.edit().putString("lf_key", k).putString("lf_session", s)
+                .putString("lb_token", t).apply();
+        toast(Scrobbler.hasLf() || Scrobbler.hasLb()
+                ? "scrobble saved" : "no credentials — scrobbling off");
+    }
+
     private void showTab(int t) {
         tab = t;
         screenLibrary.setVisibility(t == 0 ? View.VISIBLE : View.GONE);
         screenPlayer.setVisibility(t == 1 ? View.VISIBLE : View.GONE);
         screenQueue.setVisibility(t == 2 ? View.VISIBLE : View.GONE);
         screenSettings.setVisibility(t == 3 ? View.VISIBLE : View.GONE);
+        screenScrobble.setVisibility(t == 4 ? View.VISIBLE : View.GONE);
+        if (t == 4) populateScrobble();
         if (t == 2) refreshQueueList();
     }
 
@@ -514,6 +686,7 @@ public class MainActivity extends Activity {
         pArtist.setText(t.artist);
         pAlbum.setText(t.album);
         pArt.setImageBitmap(t.art);
+        repaintBg(t.art);
         /* real waveform (async decode — never block the UI thread).
          * while it loads, the seekbar shows a flat silent baseline */
         pSeek.resetWaveform();

@@ -1,0 +1,21 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+  <!-- feather "eye": almond lens + iris, stroke style -->
+  <path
+      android:pathData="M1,12C1,12 5,4 12,4C19,4 23,12 23,12C23,12 19,20 12,20C5,20 1,12 1,12Z"
+      android:strokeColor="#FFE8DDD0"
+      android:strokeWidth="1.7"
+      android:strokeLineCap="round"
+      android:strokeLineJoin="round"
+      android:fillColor="#00000000" />
+  <path
+      android:pathData="M12,8.6A3.4,3.4 0,1 1,12 15.4A3.4,3.4 0,1 1,12 8.6"
+      android:strokeColor="#FFE8DDD0"
+      android:strokeWidth="1.7"
+      android:strokeLineCap="round"
+      android:strokeLineJoin="round"
+      android:fillColor="#00000000" />
+</vector>

@@ -40,6 +40,8 @@ public class AlbumAdapter extends ArrayAdapter<Object> {
         TextView title = convert.findViewById(R.id.item_title);
         TextView sub = convert.findViewById(R.id.item_artist);
         ImageView art = convert.findViewById(R.id.item_art);
+        title.setTextColor(Theme.txt());
+        sub.setTextColor(Theme.dim());
         if (o instanceof Album) {
             Album a = (Album) o;
             title.setText(a.titleLine());

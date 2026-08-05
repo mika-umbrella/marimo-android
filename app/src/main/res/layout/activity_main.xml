@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
@@ -124,6 +125,7 @@
                     android:contentDescription="back" />
 
                 <TextView
+                    android:id="@+id/title_settings"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
@@ -133,6 +135,17 @@
                     android:textStyle="bold"
                     android:textColor="#7dff7d" />
             </LinearLayout>
+
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:fillViewport="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
 
             <Button
                 android:id="@+id/set_pick"
@@ -155,6 +168,16 @@
                 android:paddingStart="16dp" />
 
             <Button
+                android:id="@+id/set_theme"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="10dp"
+                android:text="dark theme: on"
+                android:textSize="15sp"
+                android:gravity="start|center_vertical"
+                android:paddingStart="16dp" />
+
+            <Button
                 android:id="@+id/set_scrobble"
                 android:layout_width="match_parent"
                 android:layout_height="56dp"
@@ -172,6 +195,159 @@
                 android:text="marimo for android — made by mika"
                 android:textSize="12sp"
                 android:textColor="#6b6b76" />
+            </LinearLayout>
+            </ScrollView>
+        </LinearLayout>
+
+        <!-- scrobble screen -->
+        <LinearLayout
+            android:id="@+id/screen_scrobble"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:padding="12dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <ImageButton
+                    android:id="@+id/btn_scrobble_back"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:src="@drawable/ic_back"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:contentDescription="back" />
+
+                <TextView
+                    android:id="@+id/title_scrobble"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="12dp"
+                    android:text="scrobble"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="#7dff7d" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="credentials are masked — tap the eye to reveal (keys can&#39;t be screenshotted)"
+                android:textSize="12sp"
+                android:textColor="#6b6b76" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:layout_marginStart="4dp"
+                android:text="last.fm api key"
+                android:textSize="13sp"
+                android:textColor="#c9c9d1" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+
+                <EditText
+                    android:id="@+id/et_lf_key"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:inputType="textPassword"
+                    android:hint="api key"
+                    android:textSize="14sp" />
+
+                <ImageButton
+                    android:id="@+id/eye_lf_key"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:src="@drawable/ic_eye"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:contentDescription="reveal" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:layout_marginStart="4dp"
+                android:text="last.fm session key"
+                android:textSize="13sp"
+                android:textColor="#c9c9d1" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+
+                <EditText
+                    android:id="@+id/et_lf_session"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:inputType="textPassword"
+                    android:hint="session key"
+                    android:textSize="14sp" />
+
+                <ImageButton
+                    android:id="@+id/eye_lf_session"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:src="@drawable/ic_eye"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:contentDescription="reveal" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:layout_marginStart="4dp"
+                android:text="listenbrainz token"
+                android:textSize="13sp"
+                android:textColor="#c9c9d1" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+
+                <EditText
+                    android:id="@+id/et_lb_token"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:inputType="textPassword"
+                    android:hint="token"
+                    android:textSize="14sp" />
+
+                <ImageButton
+                    android:id="@+id/eye_lb_token"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:src="@drawable/ic_eye"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:contentDescription="reveal" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btn_scrobble_save"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="24dp"
+                android:text="save credentials"
+                android:textSize="15sp" />
         </LinearLayout>
 
         <!-- queue screen -->
@@ -180,16 +356,33 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:orientation="vertical"
-            android:padding="20dp"
+            android:padding="12dp"
             android:visibility="gone">
 
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="queue"
-                android:textSize="20sp"
-                android:textStyle="bold"
-                android:textColor="#7dff7d" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:id="@+id/title_queue"
+                    android:text="queue"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="#7dff7d" />
+
+                <ImageButton
+                    android:id="@+id/btn_settings_q"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:src="@drawable/ic_settings"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:contentDescription="settings" />
+            </LinearLayout>
 
             <ListView
                 android:id="@+id/q_list"
@@ -213,6 +406,24 @@
             android:paddingTop="12dp"
             android:paddingBottom="8dp"
             android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:orientation="horizontal">
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1" />
+                <ImageButton
+                    android:id="@+id/btn_settings_p"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="-4dp"
+                    android:src="@drawable/ic_settings"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:contentDescription="settings" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/p_title"
@@ -344,10 +555,11 @@
 
     <!-- bottom tab bar -->
     <LinearLayout
+        android:id="@+id/tab_bar"
         android:layout_width="match_parent"
         android:layout_height="56dp"
         android:orientation="horizontal"
-        android:background="#0d0d0f">
+        android:background="@android:color/transparent">
 
         <Button
             android:id="@+id/tab_queue"

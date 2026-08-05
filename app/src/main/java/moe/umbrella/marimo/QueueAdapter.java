@@ -26,6 +26,8 @@ public class QueueAdapter extends ArrayAdapter<Track> {
         TextView title = convert.findViewById(R.id.item_title);
         TextView sub = convert.findViewById(R.id.item_artist);
         ImageView art = convert.findViewById(R.id.item_art);
+        title.setTextColor(Theme.txt());
+        sub.setTextColor(Theme.dim());
         int cur = PlaybackService.currentIndex();
         String name = t.title.isEmpty() ? t.name : t.title;
         title.setText((pos == cur ? "▶ " : "") + String.format("%02d", pos + 1)

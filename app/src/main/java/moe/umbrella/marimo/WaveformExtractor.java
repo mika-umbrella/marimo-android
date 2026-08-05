@@ -8,8 +8,9 @@ import android.net.Uri;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Real waveform extraction via MediaExtractor + MediaCodec.
  *  Two passes: count total decoded samples, then bucket each sample by
@@ -21,20 +22,50 @@ import java.util.Map;
 public class WaveformExtractor {
 
     public static final int BUCKETS = 96;
-    private static final Map<String, int[]> cache = new HashMap<>();
+    private static final Map<String, int[]> cache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<String, Object> tokenLocks =
+            new java.util.concurrent.ConcurrentHashMap<>();
     private static final String CACHE_DIR = "waveforms";
 
-    public static synchronized int[] get(Context ctx, String token) {
+    /* one shared CPU-bound pool: lets whole-album pre-warming decode many
+     * tracks at once (no global lock) instead of one serial 30s each */
+    private static final ExecutorService pool = Executors.newFixedThreadPool(
+            Math.max(2, Runtime.getRuntime().availableProcessors()));
+
+    /** parallel pre-warm of future tracks so their waveforms are on disk
+     *  before they start playing — the seekbar fills instantly later.
+     *  skips already-cached tokens, never blocks the caller. */
+    public static void prewarm(Context ctx, java.util.List<String> tokens) {
+        for (String token : tokens) {
+            try {
+                if (cache.containsKey(token)) continue;
+                if (cacheFile(ctx, token).exists()) continue;
+            } catch (Exception ignore) { continue; }
+            pool.submit(() -> {
+                try { get(ctx, token); } catch (Exception ignore) { }
+            });
+        }
+    }
+
+    public static int[] get(Context ctx, String token) {
         int[] hit = cache.get(token);
         if (hit != null) return hit;
-        hit = readDisk(ctx, token);
-        if (hit != null) { cache.put(token, hit); return hit; }
-        int[] peaks = extract(ctx, token);
-        if (peaks != null) {
-            cache.put(token, peaks);
-            writeDisk(ctx, token, peaks);
+        /* per-token lock: different tokens decode in parallel, the same token
+         * (get + prewarm racing) extracts only once */
+        Object lock = tokenLocks.computeIfAbsent(token, k -> new Object());
+        synchronized (lock) {
+            hit = cache.get(token);
+            if (hit != null) return hit;
+            hit = readDisk(ctx, token);
+            if (hit != null) { cache.put(token, hit); return hit; }
+            int[] peaks = extract(ctx, token);
+            if (peaks != null) {
+                cache.put(token, peaks);
+                writeDisk(ctx, token, peaks);
+            }
+            return peaks;
         }
-        return peaks;
     }
 
     /** persist a waveform once so repeat listens (even across launches) are

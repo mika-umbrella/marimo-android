@@ -1045,7 +1045,25 @@ public class MainActivity extends Activity {
             int[] peaks = WaveformExtractor.get(this, t.token);
             runOnUiThread(() -> pSeek.setWaveformPeaks(peaks));
         }).start();
+        /* pre-warm the rest of the album/queue's waveforms in parallel so the
+         * seekbar is already filled (cached) when each track starts — the full
+         * software FLAC decode happens in the background, not on first play */
+        prewarmWaveforms(t);
         refreshQueueList();
+    }
+
+    /** find the track's context (album or queue) and decode its future tracks'
+     *  waveforms in the background — non-blocking, skips already-cached. */
+    private void prewarmWaveforms(Track t) {
+        List<Track> ctx = tracksOf(t);
+        if (ctx == null || ctx.isEmpty()) return;
+        int idx = ctx.indexOf(t);
+        int start = idx < 0 ? 0 : idx;
+        java.util.List<String> tokens = new ArrayList<>();
+        for (int i = start; i < ctx.size(); i++)
+            tokens.add(ctx.get(i).token);
+        if (!tokens.isEmpty())
+            new Thread(() -> WaveformExtractor.prewarm(this, tokens)).start();
     }
 
     private void refreshQueueList() {

@@ -409,7 +409,10 @@ static int tag_read_f(FILE *f, Meta *meta, int *track, int *disc)
         meta->have_meta = meta->title[0] || meta->artist[0] || meta->album[0] || meta->duration_ms > 0;
         if (tr > 0) meta->track = tr;
         if (dc > 0) meta->disc = dc;
-        if (rc == 0 && !meta->have_meta) rc = -1;
+        /* success if we got tags OR a track/disc number — a FLAC with
+         * title/artist/album but no tracknumber must still count as read,
+         * not get discarded by flac_parse's internal -1. */
+        rc = (meta->have_meta || tr > 0 || dc > 0) ? 0 : -1;
     }
     if (track) *track = tr;
     if (disc) *disc = dc;

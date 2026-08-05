@@ -549,6 +549,27 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    /** order album tracks by (disc, trackNo); fall back to the leading
+     *  digits of the filename when the tag has no track number (keeps the
+     *  scan order from listFiles() from being arbitrary). */
+    private void sortAlbumTracks(Album a) {
+        java.util.Collections.sort(a.tracks, (x, y) -> Integer.compare(key(x), key(y)));
+    }
+
+    private int key(Track t) {
+        int d = t.disc > 0 ? t.disc : 1;
+        int n = t.track;
+        if (n <= 0) {
+            String s = t.name.trim();
+            int i = 0;
+            while (i < s.length() && Character.isDigit(s.charAt(i))) i++;
+            if (i == 0) return Integer.MAX_VALUE;   /* no number -> end */
+            try { n = Integer.parseInt(s.substring(0, i)); }
+            catch (Exception e) { n = Integer.MAX_VALUE; }
+        }
+        return d * 10000 + n;
+    }
+
     private int totalTracks() {
         int n = 0;
         for (Album a : albums) n += a.tracks.size();
@@ -594,6 +615,7 @@ public class MainActivity extends Activity {
                             if (a.coverIdx < 0 && tr.art != null) a.coverIdx = a.tracks.size();
                             a.tracks.add(tr);
                         }
+                sortAlbumTracks(a);
                 if (!a.tracks.isEmpty()) addAlbum(a);
             } else if (f.isFile() && isAudio(f.getName())) {
                 Album loose = new Album("(loose files)");
@@ -617,6 +639,7 @@ public class MainActivity extends Activity {
                         if (a.coverIdx < 0 && tr.art != null) a.coverIdx = a.tracks.size();
                         a.tracks.add(tr);
                     }
+                sortAlbumTracks(a);
                 if (!a.tracks.isEmpty()) addAlbum(a);
             } else if (f.isFile() && isAudio(f.getName())) {
                 Album loose = new Album("(loose files)");

@@ -154,7 +154,12 @@ public class MainActivity extends Activity {
         });
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             requestPermissions(new String[]{
+                    android.Manifest.permission.READ_MEDIA_AUDIO,
+                    android.Manifest.permission.READ_MEDIA_IMAGES,
                     android.Manifest.permission.POST_NOTIFICATIONS}, 1);
+        } else {
+            requestPermissions(new String[]{
+                    android.Manifest.permission.READ_EXTERNAL_STORAGE}, 1);
         }
         qList = findViewById(R.id.q_list);
         qList.setOnItemClickListener((p, v, pos, id) -> {
@@ -652,23 +657,50 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** map an externalstorage content:// tree doc back to a real path —
+     *  waydroid's provider can't open files it never indexed into MediaStore,
+     *  so we fall back to reading /storage/emulated/0/... directly (the app
+     *  holds READ_MEDIA_AUDIO/READ_EXTERNAL_STORAGE for exactly this). */
+    private String contentPath(String token) {
+        try {
+            if (!token.startsWith("content://")) return null;
+            String p = Uri.parse(token).getPath();
+            int i = p == null ? -1 : p.indexOf("/document/");
+            if (i < 0) return null;
+            String id = Uri.decode(p.substring(i + 10));
+            if (!id.startsWith("primary:")) return null;
+            return "/storage/emulated/0/" + id.substring("primary:".length());
+        } catch (Exception e) { return null; }
+    }
+
     private void readTags(Track t) {
         try {
             byte[] title = new byte[512], artist = new byte[512], album = new byte[512];
             int[] dur = new int[1], tr = new int[1], dc = new int[1];
-            int rc;
+            int rc = -1;
             if (t.token.startsWith("content://")) {
-                ParcelFileDescriptor pfd =
-                        getContentResolver().openFileDescriptor(Uri.parse(t.token), "r");
-                if (pfd == null) return;
+                ParcelFileDescriptor pfd = null;
                 try {
-                    rc = NativeBridge.tagReadFd(pfd.detachFd(), title, artist, album,
-                            dur, tr, dc);
+                    pfd = getContentResolver()
+                            .openFileDescriptor(Uri.parse(t.token), "r");
+                    if (pfd != null)
+                        rc = NativeBridge.tagReadFd(pfd.detachFd(),
+                                title, artist, album, dur, tr, dc);
+                } catch (Exception e) {
+                    /* provider threw (unindexed file) -> direct path below */
                 } finally {
-                    pfd.close();
+                    if (pfd != null)
+                        try { pfd.close(); } catch (Exception ignore) { }
+                }
+                if (rc != 0) {                 /* fall back to real path */
+                    String path = contentPath(t.token);
+                    if (path != null)
+                        rc = NativeBridge.tagReadPath(path,
+                                title, artist, album, dur, tr, dc);
                 }
             } else {
-                rc = NativeBridge.tagReadPath(t.token, title, artist, album, dur, tr, dc);
+                rc = NativeBridge.tagReadPath(t.token,
+                        title, artist, album, dur, tr, dc);
             }
             if (rc == 0) {
                 t.title = new String(title, StandardCharsets.UTF_8).trim();
@@ -684,20 +716,55 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** read cover.jpg/folder.jpg/front.jpg from the audio file's folder —
+     *  used when a track has no embedded art. */
+    private byte[] folderCover(String audioPath) {
+        try {
+            java.io.File dir = new java.io.File(audioPath).getParentFile();
+            if (dir == null) return null;
+            String[] names = {"cover.jpg", "folder.jpg", "front.jpg",
+                              "cover.png", "folder.png", "front.png"};
+            for (String n : names) {
+                java.io.File c = new java.io.File(dir, n);
+                if (c.exists() && c.isFile()) {
+                    java.io.FileInputStream in = new java.io.FileInputStream(c);
+                    byte[] b = new byte[(int) c.length()];
+                    int off = 0;
+                    while (off < b.length) {
+                        int r = in.read(b, off, b.length - off);
+                        if (r < 0) break;
+                        off += r;
+                    }
+                    in.close();
+                    if (off == b.length) return b;
+                }
+            }
+        } catch (Exception e) { }
+        return null;
+    }
+
     private Bitmap loadArt(String token) {
         try {
-            byte[] raw;
+            byte[] raw = null;
             if (token.startsWith("content://")) {
-                ParcelFileDescriptor pfd =
-                        getContentResolver().openFileDescriptor(Uri.parse(token), "r");
-                if (pfd == null) return null;
+                ParcelFileDescriptor pfd = null;
                 try {
-                    raw = NativeBridge.embeddedArtFd(pfd.detachFd());
-                } finally {
-                    pfd.close();
+                    pfd = getContentResolver().openFileDescriptor(Uri.parse(token), "r");
+                    if (pfd != null) {
+                        try { raw = NativeBridge.embeddedArtFd(pfd.detachFd()); }
+                        finally { try { pfd.close(); } catch (Exception ignore) { } }
+                    }
+                } catch (Exception e) { /* fall to path */ }
+                if (raw == null) {                 /* unindexed-file fallback */
+                    String path = contentPath(token);
+                    if (path != null) {
+                        raw = NativeBridge.embeddedArtPath(path);
+                        if (raw == null) raw = folderCover(path);
+                    }
                 }
             } else {
                 raw = NativeBridge.embeddedArtPath(token);
+                if (raw == null) raw = folderCover(token);
             }
             if (raw == null || raw.length == 0) return null;
             return BitmapFactory.decodeByteArray(raw, 0, raw.length);

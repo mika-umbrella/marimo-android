@@ -420,16 +420,19 @@ static void mp3_duration(FILE *f, Meta *meta)
     meta->duration_ms = (int)(bytes * 8 / br);   /* br kbps -> bytes*8/br = ms */
 }
 
+static int ogg_parse(FILE *f, Meta *meta, int *track, int *disc);
+static int mp4_parse(FILE *f, Meta *meta, int *track, int *disc);
+
 /* shared body: parse tags from an open file (caller owns *f).
  * portable core — the android port passes SAF file descriptors here. */
 static int tag_read_f(FILE *f, Meta *meta, int *track, int *disc)
 {
-    unsigned char magic[4];
+    unsigned char magic[8];
     int tr = -1, dc = -1;
     int rc = -1;
     if (!f) return -1;
     if (meta) memset(meta, 0, sizeof(*meta));
-    if (fread(magic, 1, 4, f) != 4) return -1;
+    if (fread(magic, 1, 8, f) != 8) return -1;
     rewind(f);
     if (!memcmp(magic, "fLaC", 4)) {
         rc = flac_parse(f, meta, &tr, &dc);
@@ -437,6 +440,10 @@ static int tag_read_f(FILE *f, Meta *meta, int *track, int *disc)
         rc = id3_parse(f, meta, &tr, &dc);
         if (meta && meta->duration_ms <= 0)
             mp3_duration(f, meta);   /* f is positioned after the ID3 tag */
+    } else if (!memcmp(magic, "OggS", 4)) {
+        rc = ogg_parse(f, meta, &tr, &dc);
+    } else if (!memcmp(magic + 4, "ftyp", 4)) {
+        rc = mp4_parse(f, meta, &tr, &dc);
     }
     if (meta) {
         meta->have_meta = meta->title[0] || meta->artist[0] || meta->album[0] || meta->duration_ms > 0;
@@ -495,4 +502,195 @@ int tag_trackinfo_fd(int fd, int *track, int *disc)
     fclose(f);
     if (*track <= 0 && *disc <= 0) rc = -1;
     return rc;
+}
+
+/* ---------------- OGG/Opus ---------------- */
+
+static unsigned long long get_u64le(const unsigned char *p) {
+    unsigned long long v = 0;
+    for (int i = 7; i >= 0; i--) v = (v << 8) | p[i];
+    return v;
+}
+static unsigned long long get_u64be(const unsigned char *p) {
+    unsigned long long v = 0;
+    for (int i = 0; i < 8; i++) v = (v << 8) | p[i];
+    return v;
+}
+
+/* parse a Vorbis-style comment block (vendor_length + comments). Opus and
+ * FLAC both use one; pass a pointer at the comment block start. */
+static void apply_comments(const unsigned char *buf, int len,
+                           Meta *meta, int *track, int *disc, int *any)
+{
+    int off, n, i;
+    if (len < 8) return;
+    off = 4 + (int)get_u32le(buf);
+    if (off + 4 > len) return;
+    n = (int)get_u32le(buf + off); off += 4;
+    for (i = 0; i < n && off + 4 <= len; i++) {
+        int clen = (int)get_u32le(buf + off); off += 4;
+        if (off + clen > len) break;
+        const unsigned char *c = buf + off;
+        int eq = -1;
+        for (int j = 0; j < clen; j++) if (c[j] == '=') { eq = j; break; }
+        if (eq > 0) {
+            const char *v = (const char *)c + eq + 1;
+            int vl = clen - eq - 1;
+#define SET_TAG(dst) do { \
+    int cc = vl < (int)sizeof meta->dst - 1 ? vl : (int)sizeof meta->dst - 1; \
+    memcpy(meta->dst, v, cc); meta->dst[cc] = 0; *any = 1; } while (0)
+            if (meta && eq == 5 && !strncasecmp((const char *)c, "TITLE", 5) && !meta->title[0]) SET_TAG(title);
+            else if (meta && eq == 6 && !strncasecmp((const char *)c, "ARTIST", 6) && !meta->artist[0]) SET_TAG(artist);
+            else if (meta && eq == 5 && !strncasecmp((const char *)c, "ALBUM", 5) && !meta->album[0]) SET_TAG(album);
+            else if (eq == 11 && !strncasecmp((const char *)c, "TRACKNUMBER", 11) && track && *track < 0) {
+                int t = parse_num(v, vl); if (t > 0) { *track = t; *any = 1; }
+            }
+            else if (eq == 10 && !strncasecmp((const char *)c, "DISCNUMBER", 10) && disc && *disc < 0) {
+                int d = parse_num(v, vl); if (d > 0) *disc = d;
+            }
+#undef SET_TAG
+        }
+        off += clen;
+    }
+}
+
+/* Opus streams: Ogg pages; tags live in the OpusTags comment packet near the
+ * start. duration = last page granule / 48000. */
+static int ogg_parse(FILE *f, Meta *meta, int *track, int *disc)
+{
+    unsigned char *buf;
+    long end, blen;
+    int any = 0;
+    fseek(f, 0, SEEK_END); end = ftell(f); fseek(f, 0, SEEK_SET);
+    blen = end < 131072 ? end : 131072;            /* OpusTags is early + small */
+    if (blen <= 0) return -1;
+    buf = (unsigned char *)malloc((size_t)blen);
+    if (fread(buf, 1, (size_t)blen, f) != (size_t)blen) { free(buf); return -1; }
+    for (long i = 0; i + 8 <= blen; i++)
+        if (!memcmp(buf + i, "OpusTags", 8)) {
+            apply_comments(buf + i + 8, (int)(blen - i - 8), meta, track, disc, &any);
+            break;
+        }
+    free(buf);
+    /* duration: granule of the last Ogg page divided by 48k */
+    if (meta) {
+        unsigned char h[27];
+        unsigned long long gran = 0;
+        long p0 = end - 66000 < 0 ? 0 : end - 66000;
+        for (long p = p0; p + 27 <= end; p++) {
+            fseek(f, p, SEEK_SET);
+            if (fread(h, 1, 27, f) != 27) break;
+            if (memcmp(h, "OggS", 4)) continue;
+            gran = get_u64le(h + 6);
+        }
+        if (gran > 0) meta->duration_ms = (int)(gran * 1000 / 48000);
+    }
+    return (any || meta->duration_ms > 0) ? 0 : -1;
+}
+
+/* ---------------- MP4 / M4A ---------------- */
+
+static long mp4_u32(FILE *f, long off) {
+    unsigned char b[4];
+    if (fseek(f, off, SEEK_SET)) return 0;
+    if (fread(b, 1, 4, f) != 4) return 0;
+    return (long)get_u32be(b);
+}
+static unsigned long long mp4_u64(FILE *f, long off) {
+    unsigned char b[8];
+    if (fseek(f, off, SEEK_SET)) return 0;
+    if (fread(b, 1, 8, f) != 8) return 0;
+    return get_u64be(b);
+}
+
+/* read a UTF-8 tag value out of an ilst item's data box (points at item's
+ * content start, which is the `data` box) */
+static const char *ilst_data(FILE *f, long content, long end, char *out, int outsz)
+{
+    unsigned char h[16];
+    long payload;
+    if (content + 16 > end) return NULL;
+    if (fseek(f, content, SEEK_SET)) return NULL;
+    if (fread(h, 1, 16, f) != 16) return NULL;
+    payload = content + 16;
+    if (payload >= end) return NULL;
+    long n = end - payload;
+    if (n > outsz - 1) n = outsz - 1;
+    if (fseek(f, payload, SEEK_SET)) return NULL;
+    if (fread(out, 1, (size_t)n, f) != (size_t)n) return NULL;
+    out[n] = 0;
+    /* strip trailing NULs */
+    while (n > 0 && out[n - 1] == 0) out[--n] = 0;
+    return out;
+}
+
+static void mp4_walk(FILE *f, long start, long end, Meta *meta,
+                     int *track, int *disc, int *any)
+{
+    long off = start;
+    while (off + 8 <= end) {
+        unsigned char h[8];
+        if (fseek(f, off, SEEK_SET)) break;
+        if (fread(h, 1, 8, f) != 8) break;
+        long boxend = (long)((unsigned int)get_u32be(h) + off);
+        if (boxend <= off || boxend > end) boxend = end;
+        char type[5] = {h[4], h[5], h[6], h[7], 0};
+        long content = off + 8;
+        if (!strcmp(type, "meta")) content += 4;    /* fullbox version/flags */
+        if (!strcmp(type, "mvhd")) {
+            int ver = mp4_u32(f, content) >> 24;
+            long ts, dur;
+            if (ver == 1) { ts = mp4_u32(f, content + 20); dur = (long)mp4_u64(f, content + 24); }
+            else          { ts = mp4_u32(f, content + 12); dur = mp4_u32(f, content + 16); }
+            if (meta && ts > 0 && dur > 0 && meta->duration_ms <= 0)
+                meta->duration_ms = (int)((unsigned long long)dur * 1000 / ts);
+        } else if (!memcmp(type, "\xA9" "nam", 4)) {
+            char val[512];
+            if (meta && !meta->title[0] && ilst_data(f, content, boxend, val, sizeof val))
+                { strncpy(meta->title, val, sizeof meta->title - 1); meta->title[sizeof meta->title - 1] = 0; *any = 1; }
+        } else if (!memcmp(type, "\xA9" "ART", 4) || !memcmp(type, "aART", 4)) {
+            char val[512];
+            if (meta && !meta->artist[0] && ilst_data(f, content, boxend, val, sizeof val))
+                { strncpy(meta->artist, val, sizeof meta->artist - 1); meta->artist[sizeof meta->artist - 1] = 0; *any = 1; }
+        } else if (!memcmp(type, "\xA9" "alb", 4)) {
+            char val[512];
+            if (meta && !meta->album[0] && ilst_data(f, content, boxend, val, sizeof val))
+                { strncpy(meta->album, val, sizeof meta->album - 1); meta->album[sizeof meta->album - 1] = 0; *any = 1; }
+        } else if (!memcmp(type, "trkn", 4)) {
+            unsigned char d[8];
+            if (content + 16 + 8 <= boxend) {
+                if (!fseek(f, content + 16, SEEK_SET) && fread(d, 1, 8, f) == 8) {
+                    int t = (d[2] << 8) | d[3];
+                    if (t > 0 && track && *track < 0) *track = t;
+                }
+            }
+        }
+        if (off == boxend) break;
+        off = boxend;
+        if (!strcmp(type, "moov") || !strcmp(type, "udta")
+                || !strcmp(type, "meta") || !strcmp(type, "ilst"))
+            mp4_walk(f, content, boxend, meta, track, disc, any);
+    }
+}
+
+static int mp4_parse(FILE *f, Meta *meta, int *track, int *disc)
+{
+    long end, off = 0;
+    int any = 0;
+    unsigned char h[8];
+    fseek(f, 0, SEEK_END); end = ftell(f); fseek(f, 0, SEEK_SET);
+    if (end < 12) return -1;
+    if (fread(h, 1, 8, f) != 8) return -1;
+    if (memcmp(h + 4, "ftyp", 4) != 0) return -1;    /* not an MP4 family file */
+    while (off + 8 <= end) {
+        if (fseek(f, off, SEEK_SET)) break;
+        if (fread(h, 1, 8, f) != 8) break;
+        long boxend = (long)((unsigned int)get_u32be(h) + off);
+        if (boxend <= off || boxend > end) boxend = end;
+        if (!memcmp(h + 4, "moov", 4))
+            mp4_walk(f, off + 8, boxend, meta, track, disc, &any);
+        if (boxend >= end) break;
+        off = boxend;
+    }
+    return any ? 0 : -1;
 }

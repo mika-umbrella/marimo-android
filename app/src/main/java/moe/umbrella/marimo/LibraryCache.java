@@ -173,22 +173,25 @@ public class LibraryCache {
     }
 
     /** store a downscaled JPEG so the next launch doesn't re-read + re-decode.
-     *  keyed per album; skips the write if a sibling already cached it. */
+     *  keyed per album; skips the write if a sibling already cached it.
+     *  temp file is unique per dest so parallel prewarm threads can't clobber
+     *  each other's half-written image (which caused wrong/mangled covers). */
     public static void writeArt(Context ctx, String token, Bitmap bmp) {
         try {
-            java.io.File dst = artFile(ctx, token);
+            java.io.File d = new java.io.File(ctx.getFilesDir(), ART_DIR);
+            d.mkdirs();
+            java.io.File dst = new java.io.File(d,
+                    Long.toHexString(tokenHash(artKey(token))) + ".jpg");
             if (dst.exists()) return;
-            java.io.File tmp = new java.io.File(
-                    ctx.getFilesDir(), ART_DIR + "/.tmp.jpg");
+            String name = Long.toHexString(
+                    tokenHash(token + "." + java.lang.System.nanoTime()))
+                    + ".tmp";
+            java.io.File tmp = new java.io.File(d, name);
             try (java.io.FileOutputStream out =
                          new java.io.FileOutputStream(tmp)) {
                 bmp.compress(Bitmap.CompressFormat.JPEG, 82, out);
             }
-            if (!tmp.renameTo(dst)) {
-                java.nio.file.Files.copy(tmp.toPath(), dst.toPath(),
-                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                tmp.delete();
-            }
+            tmp.renameTo(dst);   /* atomic on same filesystem dir */
         } catch (Exception e) { }
     }
 }

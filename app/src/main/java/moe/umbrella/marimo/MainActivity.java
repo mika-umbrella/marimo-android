@@ -415,6 +415,21 @@ public class MainActivity extends Activity {
     @Override
     protected void onStart() { super.onStart(); startBgLoop(); }
 
+    /** OS back: walk out of nested UI instead of killing the app —
+     *  folder -> library, settings/scrobble -> library, else exit. */
+    @Override
+    public void onBackPressed() {
+        if (openAlbum != null) {         /* in an album folder */
+            goRoot();
+            return;
+        }
+        if (tab == 3 || tab == 4) {       /* settings / scrobble screens */
+            showTab(0);
+            return;
+        }
+        super.onBackPressed();
+    }
+
     @Override
     protected void onStop() { super.onStop(); stopBgLoop(); }
 

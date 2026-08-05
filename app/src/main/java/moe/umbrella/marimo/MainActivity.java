@@ -681,9 +681,35 @@ public class MainActivity extends Activity {
             List<Album> found = new ArrayList<>();
             HashMap<Track, DocumentFile> dirs = new HashMap<>();
 
+            ExecutorService pool = Executors.newFixedThreadPool(
+                    Math.max(2, Runtime.getRuntime().availableProcessors()));
+            List<Future<?>> futs = new ArrayList<>();
+
+            /* the SAF folder walk (listFiles() per folder) is the real crawl —
+             * run each folder's listing in parallel across the pool. folders
+             * are independent, so results merge under a lock. */
             scanAppDirCollect(found);
-            if (treeUri != null) scanTreeCollect(
-                    DocumentFile.fromTreeUri(this, treeUri), found, dirs);
+            if (treeUri != null) {
+                final DocumentFile rootDir =
+                        DocumentFile.fromTreeUri(this, treeUri);
+                final Object mergeLock = new Object();
+                for (DocumentFile f : rootDir.listFiles()) {
+                    futs.add(pool.submit(() -> {
+                        List<Album> per = new ArrayList<>();
+                        HashMap<Track, DocumentFile> pdirs = new HashMap<>();
+                        collectTreeFolder(f, rootDir, per, pdirs);
+                        synchronized (mergeLock) {
+                            found.addAll(per);
+                            dirs.putAll(pdirs);
+                        }
+                        return null;
+                    }));
+                }
+            }
+            /* wait for the folder walk to finish so `found` is complete */
+            for (Future<?> f : futs)
+                try { f.get(); } catch (Exception ignore) { }
+            futs.clear();
 
             final int totalAlbums = found.size();
             runOnUiThread(() -> {
@@ -693,9 +719,6 @@ public class MainActivity extends Activity {
                 if (circle != null) circle.setProgress(0, totalAlbums, "0 / " + totalAlbums);
             });
 
-            ExecutorService pool = Executors.newFixedThreadPool(
-                    Math.max(2, Runtime.getRuntime().availableProcessors()));
-            List<Future<?>> futs = new ArrayList<>();
             java.util.concurrent.atomic.AtomicInteger albumDone =
                     new java.util.concurrent.atomic.AtomicInteger();
             for (Album a : found) {
@@ -863,26 +886,27 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void scanTreeCollect(DocumentFile dir, List<Album> found,
-                                 HashMap<Track, DocumentFile> dirs) {
-        for (DocumentFile f : dir.listFiles()) {
-            if (f.isDirectory()) {
-                Album a = new Album(f.getName());
-                a.albumDoc = f;
-                for (DocumentFile t : f.listFiles())
-                    if (t.isFile() && isAudio(t.getName())) {
-                        Track tr = new Track(t.getUri().toString(), t.getName());
-                        dirs.put(tr, f);
-                        a.tracks.add(tr);
-                    }
-                if (!a.tracks.isEmpty()) found.add(a);
-            } else if (f.isFile() && isAudio(f.getName())) {
-                Album loose = new Album("(loose files)");
-                Track tr = new Track(f.getUri().toString(), f.getName());
-                dirs.put(tr, dir);
-                loose.tracks.add(tr);
-                found.add(loose);
-            }
+    /** list one tree folder (album dir or loose file) into per-thread locals.
+     *  called from the parallel walk; caller merges under a lock. */
+    private void collectTreeFolder(DocumentFile f, DocumentFile rootDir,
+                                   List<Album> per,
+                                   HashMap<Track, DocumentFile> pdirs) {
+        if (f.isDirectory()) {
+            Album a = new Album(f.getName());
+            a.albumDoc = f;
+            for (DocumentFile t : f.listFiles())
+                if (t.isFile() && isAudio(t.getName())) {
+                    Track tr = new Track(t.getUri().toString(), t.getName());
+                    pdirs.put(tr, f);
+                    a.tracks.add(tr);
+                }
+            if (!a.tracks.isEmpty()) per.add(a);
+        } else if (f.isFile() && isAudio(f.getName())) {
+            Album loose = new Album("(loose files)");
+            Track tr = new Track(f.getUri().toString(), f.getName());
+            pdirs.put(tr, rootDir);
+            loose.tracks.add(tr);
+            per.add(loose);
         }
     }
 

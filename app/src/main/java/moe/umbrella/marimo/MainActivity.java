@@ -302,6 +302,26 @@ public class MainActivity extends Activity {
             }
         }
 
+        /* show the cached library instantly, then refresh in the background —
+         * startup no longer waits for the full SAF walk + tag reads */
+        List<Album> cached = LibraryCache.load(this);
+        if (!cached.isEmpty()) {
+            albums.addAll(cached);
+            buildEntries();
+            adapter.notifyDataSetChanged();
+            status.setText(albums.size() + " albums · "
+                    + totalTracks() + " tracks");
+            /* load cached cover art in the background so the list isn't empty
+             * (iterate the local snapshot — rescan clears the live field) */
+            final List<Album> snapshot = cached;
+            new Thread(() -> {
+                for (Album a : snapshot)
+                    for (Track t : a.tracks)
+                        if (t.art == null)
+                            t.art = LibraryCache.readArt(this, t.token);
+                runOnUiThread(() -> adapter.notifyDataSetChanged());
+            }).start();
+        }
         rescan();
         PlaybackService.attachQueueStorage(
                 new File(getFilesDir(), "queue.dat"));
@@ -667,6 +687,7 @@ public class MainActivity extends Activity {
             }
             Collections.sort(albums, (a, b) ->
                     a.folder.compareToIgnoreCase(b.folder));
+            LibraryCache.save(this, albums);
             runOnUiThread(() -> {
                 buildEntries();
                 adapter.notifyDataSetChanged();
@@ -868,6 +889,9 @@ public class MainActivity extends Activity {
 
     private Bitmap loadArt(String token, DocumentFile albumDir) {
         try {
+            /* disk art cache first: no SAF open + decode on repeated launches */
+            Bitmap cached = LibraryCache.readArt(this, token);
+            if (cached != null) return cached;
             byte[] raw = null;
             if (token.startsWith("content://")) {
                 ParcelFileDescriptor pfd = null;
@@ -884,7 +908,9 @@ public class MainActivity extends Activity {
                 if (raw == null) raw = folderCoverPath(token);
             }
             if (raw == null || raw.length == 0) return null;
-            return decodeScaled(raw, 1024);
+            Bitmap bmp = decodeScaled(raw, 1024);
+            if (bmp != null) LibraryCache.writeArt(this, token, bmp);
+            return bmp;
         } catch (Exception e) {
             return null;
         }

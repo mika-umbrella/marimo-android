@@ -5,7 +5,7 @@ import android.graphics.Bitmap;
 /** One playable track: a path or content URI + tags from the C core. */
 public class Track {
     public final String token;   // absolute path or content:// URI
-    public final String name;    // filename
+    public String name;          // filename
     public String title = "";
     public String artist = "";
     public String album = "";

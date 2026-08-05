@@ -325,7 +325,12 @@ public class MainActivity extends Activity {
 
     /** after a track's art loads, repaint the gradient from it */
     private void repaintBg(Bitmap art) {
-        currentArt = art;              /* the bg loop reads this each tick */
+        currentArt = art;
+        /* paint one static frame now — the drift loop may be stopped (nothing
+         * playing), so a theme toggle / art change must repaint immediately
+         * instead of waiting for a lock/unlock recreate. */
+        rootView.setBackground(BgManager.gradientFor(
+                this, art, Theme.scrim(), (lastPlayMs - animStart) / 1000f));
         restyleSurfaces();
     }
 

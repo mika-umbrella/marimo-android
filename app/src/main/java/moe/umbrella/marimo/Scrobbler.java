@@ -21,8 +21,11 @@ public class Scrobbler {
     private static final String LF_API = "https://ws.audioscrobbler.com/2.0/";
     private static final String LB_API = "https://api.listenbrainz.org/1/submit-listens";
 
-    private static volatile String lfKey = "";
-    private static volatile String lfSecret = "";
+    /* the app's own last.fm API credentials (nova's, baked in) — the user
+     * never needs to enter these; the interactive login fetches the session
+     * key for them. */
+    private static volatile String lfKey = "78ce5d8d089235d368ce38e672b3a335";
+    private static volatile String lfSecret = "9ce63846c15e759f7161a6436c698442";
     private static volatile String lfSession = "";
     private static volatile String lfUser = "";
     private static volatile String lbToken = "";
@@ -30,11 +33,13 @@ public class Scrobbler {
     /** set from the settings dialog */
     public static void configure(String lfKeyV, String lfSecretV, String lfSessionV,
                                  String lfUserV, String lbTokenV) {
-        lfKey = lfKeyV == null ? "" : lfKeyV;
-        lfSecret = lfSecretV == null ? "" : lfSecretV;
-        lfSession = lfSessionV == null ? "" : lfSessionV;
-        lfUser = lfUserV == null ? "" : lfUserV;
-        lbToken = lbTokenV == null ? "" : lbTokenV;
+        /* only override with non-empty values — keeps the baked-in app
+         * api key/secret if prefs come back blank on a fresh install */
+        if (lfKeyV != null && !lfKeyV.isEmpty()) lfKey = lfKeyV;
+        if (lfSecretV != null && !lfSecretV.isEmpty()) lfSecret = lfSecretV;
+        if (lfSessionV != null && !lfSessionV.isEmpty()) lfSession = lfSessionV;
+        if (lfUserV != null && !lfUserV.isEmpty()) lfUser = lfUserV;
+        if (lbTokenV != null && !lbTokenV.isEmpty()) lbToken = lbTokenV;
         saveToPrefs();
     }
 

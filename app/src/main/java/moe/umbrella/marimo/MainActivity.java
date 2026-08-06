@@ -995,7 +995,10 @@ public class MainActivity extends Activity {
         }, "lf-art-" + artist).start();
     }
 
-    /** last.fm artist.getinfo -> the artist's photo (or null) */
+    /** last.fm artist.getinfo -> the artist's photo (or null).
+     *  getinfo's image[] is the blank placeholder for most artists — that
+     *  known hash (2a96cbd8...) is last.fm's "no image"; reject it so we never
+     *  paint over real local art with a grey box. */
     private Bitmap lastFmArtistImage(String artist) {
         try {
             String key = Scrobbler.current()[0];
@@ -1005,12 +1008,20 @@ public class MainActivity extends Activity {
                     + "&api_key=" + key + "&format=json";
             String body = httpGet(url);
             if (body == null) return null;
-            java.util.regex.Matcher m = java.util.regex.Pattern
-                    .compile("\"#text\":\"(https?://[^\"]+)\"").matcher(body);
-            String img = null;
-            while (m.find()) img = m.group(1);     /* last = largest */
-            if (img == null || img.isEmpty()) return null;
-            byte[] data = httpGetBytes(img);
+            org.json.JSONObject a = new org.json.JSONObject(body)
+                    .optJSONObject("artist");
+            if (a == null) return null;
+            org.json.JSONArray imgs = a.optJSONArray("image");
+            if (imgs == null) return null;
+            String chosen = null;
+            for (int i = 0; i < imgs.length(); i++) {
+                String t = imgs.optJSONObject(i).optString("#text", "");
+                if (!t.isEmpty()) chosen = t;      /* last non-empty = largest */
+            }
+            if (chosen == null
+                    || chosen.contains("2a96cbd8b46e442fc41c2b86b821562f"))
+                return null;                        /* last.fm no-image placeholder */
+            byte[] data = httpGetBytes(chosen);
             if (data == null || data.length == 0) return null;
             return decodeScaled(data, 300);
         } catch (Exception e) {

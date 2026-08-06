@@ -715,13 +715,14 @@ public class MainActivity extends Activity {
 
         String title = recapMode == Recap.MODE_WEEK ? "your week in marimo"
                 : recapMode == Recap.MODE_MONTH ? "your month in marimo"
-                : "your year in marimo";
+                : "your " + fmtYear(w[0]) + " in marimo";
         ((TextView) findViewById(R.id.title_recap)).setText(title);
         stylePeriodButtons();
 
         recapBody.removeAllViews();
-        addSectionLabel(fmtRange(w[0], w[1]));
+        addSectionLabel(fmtPeriod(recapMode, w));
         addStatRow(r);
+        addListeningBehaviour(r);
         addDeltaLine(r);
         addBars(r);
         if (r.empty) {
@@ -735,7 +736,6 @@ public class MainActivity extends Activity {
         addTopN("top artists", r.topArtists);
         addTopN("top albums", r.topAlbums);
         addTopN("top tracks", r.topTracks);
-        addListeningBehaviour(r);
         addShare(r);
     }
 
@@ -979,11 +979,23 @@ public class MainActivity extends Activity {
         return h + "h " + String.format("%02dm", m);
     }
 
-    private String fmtRange(long a, long b) {
-        java.text.SimpleDateFormat f = new java.text.SimpleDateFormat(
+    private String fmtPeriod(int mode, long[] w) {
+        java.text.SimpleDateFormat d = new java.text.SimpleDateFormat(
                 "MMM d", java.util.Locale.US);
-        return f.format(new java.util.Date(a)) + " – "
-                + f.format(new java.util.Date(b - 1));
+        java.text.SimpleDateFormat my = new java.text.SimpleDateFormat(
+                "MMMM yyyy", java.util.Locale.US);
+        if (mode == Recap.MODE_WEEK)
+            return d.format(new java.util.Date(w[0])) + " – "
+                    + d.format(new java.util.Date(w[1] - 1));
+        if (mode == Recap.MODE_MONTH)
+            return my.format(new java.util.Date(w[0]));
+        return fmtYear(w[0]);
+    }
+
+    /** the calendar year of an epoch ms */
+    private String fmtYear(long ms) {
+        return new java.text.SimpleDateFormat("yyyy", java.util.Locale.US)
+                .format(new java.util.Date(ms));
     }
 
     /* ---------------- library / album grouping ---------------- */

@@ -171,7 +171,7 @@ public final class Recap {
             c.setTimeInMillis(e.ts);
             int idx;
             if (mode == MODE_WEEK) {
-                idx = c.get(Calendar.DAY_OF_WEEK) - Calendar.SUNDAY;   // Sun..Sat
+                idx = (c.get(Calendar.DAY_OF_WEEK) - Calendar.MONDAY + 7) % 7; // Mon..Sun
             } else if (mode == MODE_MONTH) {
                 idx = Math.min(4, (c.get(Calendar.DAY_OF_MONTH) - 1) / 7);
             } else {
@@ -285,6 +285,13 @@ public final class Recap {
         return (d > 0 ? "▲ +" : "▼ −") + Math.abs(d) + " " + unit;
     }
 
+    /** "a" or "an" before a word, by its leading vowel sound */
+    public static String aAn(String s) {
+        if (s == null || s.isEmpty()) return "a";
+        char c = Character.toLowerCase(s.charAt(0));
+        return (c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u') ? "an" : "a";
+    }
+
     /** the share card Nova actually sends friends: "my week in marimo" +
      *  the headline stats + each listening-behaviour stat on its own line. */
     public static String shareCard(int period, long[] w, Result r) {
@@ -305,7 +312,8 @@ public final class Recap {
                 .append(r.artists).append(" artists · ")
                 .append(r.albums).append(" albums");
         if (r.persona != null && !r.persona.isEmpty())
-            sb.append("\nmostly a ").append(r.persona);
+            sb.append("\nmostly ").append(aAn(r.persona)).append(' ')
+                    .append(r.persona);
         if (r.streakDays > 0)
             sb.append("\nstreak: ").append(r.streakDays).append(" days in a row");
         if (r.longestSessionSec > 0)

@@ -104,8 +104,8 @@ public class RecapTest {
 
         Recap.Result r = Recap.compute(cur, new ArrayList<>(), Recap.MODE_WEEK);
         assertEquals(7, r.bars.length);
-        assertEquals(1, r.bars[0]);        // Sunday (index 0)
-        assertEquals(1, r.bars[3]);        // Wednesday (Sun+3)
+        assertEquals(1, r.bars[6]);        // Sunday (Monday-first -> index 6)
+        assertEquals(1, r.bars[2]);        // Wednesday (index 2)
     }
 
     @Test public void yearlyBarsBucketedByMonth() {
@@ -227,6 +227,14 @@ public class RecapTest {
         prev.add(entry(c.getTimeInMillis() - 86_400_000L, 200, 300_000, "Old", "b", "t0"));
         Recap.Result r = Recap.compute(cur, prev, Recap.MODE_WEEK);
         assertEquals(66, r.discoveryPct);       // 2/3 plays to new artists
+    }
+
+    @Test public void aAnPicksVowel() {
+        assertEquals("a", Recap.aAn("midnight creature"));
+        assertEquals("a", Recap.aAn("morning person"));
+        assertEquals("an", Recap.aAn("afternoon drifter"));
+        assertEquals("an", Recap.aAn("evening listener"));
+        assertEquals("a", Recap.aAn(""));
     }
 
     @Test public void shareCardIsMyNotYourAndHasBehaviour() {

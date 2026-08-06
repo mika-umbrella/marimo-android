@@ -816,7 +816,7 @@ public class MainActivity extends Activity {
         addSectionLabel("plays by " + (recapMode == Recap.MODE_WEEK ? "day"
                 : recapMode == Recap.MODE_MONTH ? "week" : "month"));
         String[] labels = recapMode == Recap.MODE_WEEK
-                ? new String[]{"Su","Mo","Tu","We","Th","Fr","Sa"}
+                ? new String[]{"Mo","Tu","We","Th","Fr","Sa","Su"}
                 : recapMode == Recap.MODE_MONTH
                 ? new String[]{"wk1","wk2","wk3","wk4","wk5"}
                 : new String[]{"J","F","M","A","M","J","J","A","S","O","N","D"};
@@ -1059,7 +1059,8 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         card.setLayoutParams(clp);
 
-        addBehaviourRow(card, "mostly a", r.persona, Theme.acc());
+        addBehaviourRow(card, "mostly " + Recap.aAn(r.persona),
+                r.persona, Theme.acc());
         if (r.streakDays > 0)
             addBehaviourRow(card, "streak", r.streakDays + " days in a row", 0);
         if (r.longestSessionSec > 0)

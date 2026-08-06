@@ -995,33 +995,27 @@ public class MainActivity extends Activity {
         }, "lf-art-" + artist).start();
     }
 
-    /** last.fm artist.getinfo -> the artist's photo (or null).
-     *  getinfo's image[] is the blank placeholder for most artists — that
-     *  known hash (2a96cbd8...) is last.fm's "no image"; reject it so we never
-     *  paint over real local art with a grey box. */
+    /** real last.fm artist photo: artist.getinfo only returns a generic
+     *  placeholder, so scrape the artist page's og:image (a static jpg — the
+     *  page's own avatars are gifs Android can't decode). */
+    private static final String LF_PAGE = "https://www.last.fm/music/";
+
     private Bitmap lastFmArtistImage(String artist) {
         try {
-            String key = Scrobbler.current()[0];
-            if (key == null || key.isEmpty()) return null;
-            String url = "https://ws.audioscrobbler.com/2.0/?method=artist.getinfo"
-                    + "&artist=" + java.net.URLEncoder.encode(artist, "UTF-8")
-                    + "&api_key=" + key + "&format=json";
-            String body = httpGet(url);
-            if (body == null) return null;
-            org.json.JSONObject a = new org.json.JSONObject(body)
-                    .optJSONObject("artist");
-            if (a == null) return null;
-            org.json.JSONArray imgs = a.optJSONArray("image");
-            if (imgs == null) return null;
-            String chosen = null;
-            for (int i = 0; i < imgs.length(); i++) {
-                String t = imgs.optJSONObject(i).optString("#text", "");
-                if (!t.isEmpty()) chosen = t;      /* last non-empty = largest */
-            }
-            if (chosen == null
-                    || chosen.contains("2a96cbd8b46e442fc41c2b86b821562f"))
-                return null;                        /* last.fm no-image placeholder */
-            byte[] data = httpGetBytes(chosen);
+            String slug = java.net.URLEncoder.encode(artist, "UTF-8")
+                    .replace("+", "%20");
+            String page = httpGet(LF_PAGE + slug);
+            if (page == null) return null;
+            java.util.regex.Matcher mt = java.util.regex.Pattern
+                    .compile("<meta[^>]*property=\"og:image\"[^>]*>")
+                    .matcher(page);
+            if (!mt.find()) return null;
+            java.util.regex.Matcher cm = java.util.regex.Pattern
+                    .compile("content=\"([^\"]+)\"").matcher(mt.group());
+            if (!cm.find()) return null;
+            String img = cm.group(1).trim();
+            if (img.isEmpty() || img.contains("2a96cbd8")) return null;
+            byte[] data = httpGetBytes(img);
             if (data == null || data.length == 0) return null;
             return decodeScaled(data, 300);
         } catch (Exception e) {

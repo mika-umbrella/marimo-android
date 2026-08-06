@@ -735,6 +735,7 @@ public class MainActivity extends Activity {
         addTopN("top artists", r.topArtists);
         addTopN("top albums", r.topAlbums);
         addTopN("top tracks", r.topTracks);
+        addListeningBehaviour(r);
         addShare(r);
     }
 
@@ -762,24 +763,29 @@ public class MainActivity extends Activity {
     private void addStatRow(Recap.Result r) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setBackgroundColor(Theme.panel());
-        row.setPadding(dp(8), dp(12), dp(8), dp(12));
-        row.addView(statCol(fmtHours(r.totalSec), "hours"));
-        row.addView(statCol(String.valueOf(r.tracks), "tracks"));
-        row.addView(statCol(String.valueOf(r.artists), "artists"));
-        row.addView(statCol(String.valueOf(r.albums), "albums"));
+        row.addView(statCell(fmtHours(r.totalSec), "hours"));
+        row.addView(statCell(String.valueOf(r.tracks), "tracks"));
+        row.addView(statCell(String.valueOf(r.artists), "artists"));
+        row.addView(statCell(String.valueOf(r.albums), "albums"));
         recapBody.addView(row);
     }
 
-    private LinearLayout statCol(String val, String lab) {
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        col.setGravity(android.view.Gravity.CENTER);
-        TextView v = mkText(val, Theme.acc(), 18, android.graphics.Typeface.BOLD);
+    /** one stat in its own rounded cell (spaced from its siblings) */
+    private LinearLayout statCell(String val, String lab) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setGravity(android.view.Gravity.CENTER);
+        cell.setBackgroundColor(Theme.panel());
+        cell.setPadding(dp(6), dp(12), dp(6), dp(12));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        lp.setMargins(dp(3), 0, dp(3), 0);
+        cell.setLayoutParams(lp);
+        TextView v = mkText(val, Theme.acc(), 17, android.graphics.Typeface.BOLD);
         TextView l = mkText(lab, Theme.sub(), 11, 0);
-        col.addView(v);
-        col.addView(l);
-        return col;
+        cell.addView(v);
+        cell.addView(l);
+        return cell;
     }
 
     private void addDeltaLine(Recap.Result r) {
@@ -886,6 +892,48 @@ public class MainActivity extends Activity {
         card.addView(track, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(5)));
         recapBody.addView(card);
+    }
+
+    private void addListeningBehaviour(Recap.Result r) {
+        if (r.tracks == 0) return;
+        addSectionLabel("listening behaviour");
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundColor(Theme.panel());
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        card.setLayoutParams(clp);
+
+        addBehaviourRow(card, "mostly a", r.persona, Theme.acc());
+        if (r.streakDays > 0)
+            addBehaviourRow(card, "streak", r.streakDays + " days in a row", 0);
+        if (r.longestSessionSec > 0)
+            addBehaviourRow(card, "longest session", fmtHours(r.longestSessionSec), 0);
+        addBehaviourRow(card, "skipped",
+                r.skipRate + "% of starts", 0);
+        if (r.replayKingPlays >= 2)
+            addBehaviourRow(card, "looped", "“" + r.replayKing + "” " + r.replayKingPlays + "×", Theme.acc());
+        if (r.mostSkippedPlays > 0)
+            addBehaviourRow(card, "most-skipped", "“" + r.mostSkipped + "”", Theme.dim());
+        addBehaviourRow(card, "discovery",
+                r.discoveryPct + "% new artists", 0);
+        recapBody.addView(card);
+    }
+
+    private void addBehaviourRow(LinearLayout card, String label, String value, int valueColor) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView l = mkText(label, Theme.dim(), 12, 0);
+        l.setPadding(0, dp(4), 0, dp(4));
+        row.addView(l, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        TextView v = mkText(value, valueColor == 0 ? Theme.txt() : valueColor,
+                12, android.graphics.Typeface.BOLD);
+        row.addView(v);
+        card.addView(row);
     }
 
     private void addShare(Recap.Result r) {

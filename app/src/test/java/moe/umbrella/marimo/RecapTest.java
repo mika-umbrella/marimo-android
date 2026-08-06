@@ -166,4 +166,66 @@ public class RecapTest {
         assertEquals("▼ −3 hours", Recap.delta(10, 7, "hours"));
         assertEquals("—", Recap.delta(5, 5, "x"));
     }
+
+    /* ---------------- listening-behaviour stats ---------------- */
+
+    @Test public void personaBucketsHour() {
+        List<HistoryDiary.Entry> cur = new ArrayList<>();
+        Calendar c = Calendar.getInstance();
+        c.set(2026, Calendar.JULY, 30, 22, 0, 0);   // evening
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "A", "a", "t"));
+        c.set(2026, Calendar.JULY, 30, 23, 0, 0);
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "B", "b", "t"));
+        c.set(2026, Calendar.JULY, 30, 9, 0, 0);    // morning (loses)
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "C", "c", "t"));
+        Recap.Result r = Recap.compute(cur, new ArrayList<>(), Recap.MODE_WEEK);
+        assertEquals("evening listener", r.persona);
+    }
+
+    @Test public void streakCountsConsecutiveDays() {
+        List<HistoryDiary.Entry> cur = new ArrayList<>();
+        Calendar c = Calendar.getInstance();
+        // two consecutive days (Wed, Thu) each with a play, then a gap
+        c.set(2026, Calendar.AUGUST, 5, 10, 0, 0);
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "A", "a", "t1"));
+        c.set(2026, Calendar.AUGUST, 6, 10, 0, 0);
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "B", "b", "t2"));
+        c.set(2026, Calendar.AUGUST, 1, 10, 0, 0);
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "C", "c", "t3"));
+        Recap.Result r = Recap.compute(cur, new ArrayList<>(), Recap.MODE_WEEK);
+        assertEquals(2, r.streakDays);
+    }
+
+    @Test public void skipRateAndDiscovery() {
+        List<HistoryDiary.Entry> cur = new ArrayList<>();
+        Calendar c = Calendar.getInstance();
+        c.set(2026, Calendar.AUGUST, 1, 12, 0, 0);
+        // loop the same track twice (discovery artist), one revisited play
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "NewArtist", "Loop", "Looping"));
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "NewArtist", "Loop", "Looping"));
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "OldArtist", "Old", "OldHit"));
+        // a skip (heard 45s of 300s = under half, >5s -> counts as a skip)
+        cur.add(entry(c.getTimeInMillis(), 45, 300_000, "OldArtist", "Old", "Skipped"));
+        List<HistoryDiary.Entry> prev = new ArrayList<>();
+        prev.add(entry(c.getTimeInMillis() - 8_6400_000L, 200, 300_000,
+                "OldArtist", "Old", "OldHit"));
+        Recap.Result r = Recap.compute(cur, prev, Recap.MODE_WEEK);
+        assertEquals(3, r.tracks);              // 3 qualified
+        assertEquals("Looping", r.replayKing);
+        assertEquals(2, r.replayKingPlays);
+        assertEquals(25, r.skipRate);           // 1 skip / (3+1) plays = 25%
+    }
+
+    @Test public void discoveryPercentOfQualified() {
+        List<HistoryDiary.Entry> cur = new ArrayList<>();
+        Calendar c = Calendar.getInstance();
+        c.set(2026, Calendar.AUGUST, 1, 12, 0, 0);
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "New", "a", "t1"));
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "New", "a", "t2"));
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "Old", "b", "t3"));
+        List<HistoryDiary.Entry> prev = new ArrayList<>();
+        prev.add(entry(c.getTimeInMillis() - 86_400_000L, 200, 300_000, "Old", "b", "t0"));
+        Recap.Result r = Recap.compute(cur, prev, Recap.MODE_WEEK);
+        assertEquals(66, r.discoveryPct);       // 2/3 plays to new artists
+    }
 }

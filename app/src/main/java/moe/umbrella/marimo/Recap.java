@@ -32,6 +32,14 @@ public final class Recap {
         public List<Row> topTracks = new ArrayList<>();
         public long[] bars;                      // per-day / per-week / per-month
         public boolean empty;                    // nothing qualified in window
+        // listening-behaviour stats (local-only: last.fm can never see these)
+        public String persona = "";
+        public int streakDays;
+        public long longestSessionSec;
+        public int skipRate;                     // pct of >5s plays that were skips
+        public String replayKing = ""; long replayKingPlays;
+        public String mostSkipped = ""; long mostSkippedPlays;
+        public int discoveryPct;                 // pct of qualified plays to new artists
     }
 
     private Recap() { }
@@ -123,6 +131,7 @@ public final class Recap {
 
         // adaptive bar chart
         r.bars = bars(cur, mode);
+        computeBehaviour(r, cur, prev);
         return r;
     }
 
@@ -171,6 +180,94 @@ public final class Recap {
             if (idx >= 0 && idx < n) bars[idx]++;
         }
         return bars;
+    }
+
+    /** local-only listening-behaviour stats (persona, streak, session, skip
+     *  rate, replay/most-skipped, discovery-vs-comfort). */
+    private static void computeBehaviour(Result r, List<HistoryDiary.Entry> cur,
+                                         List<HistoryDiary.Entry> prev) {
+        // time-of-day persona: dominant hour bucket over qualifying plays
+        int[] bucket = new int[4];
+        for (HistoryDiary.Entry e : cur) {
+            if (!countsAsPlay(e)) continue;
+            Calendar c = Calendar.getInstance(); c.setTimeInMillis(e.ts);
+            int h = c.get(Calendar.HOUR_OF_DAY);
+            bucket[h < 6 ? 0 : h < 12 ? 1 : h < 18 ? 2 : 3]++;
+        }
+        int best = 0;
+        for (int i = 1; i < 4; i++) if (bucket[i] > bucket[best]) best = i;
+        r.persona = new String[]{"midnight creature",
+                "morning person", "afternoon drifter", "evening listener"}[best];
+
+        // listening streak: longest run of consecutive days with a play
+        java.util.TreeSet<Long> days = new java.util.TreeSet<>();
+        for (HistoryDiary.Entry e : cur) if (countsAsPlay(e)) days.add(midnight(e.ts));
+        long runBest = 0, run = 0, last = Long.MIN_VALUE;
+        for (long d : days) {
+            run = (last != Long.MIN_VALUE && d == last + 86400000L) ? run + 1 : 1;
+            if (run > runBest) runBest = run;
+            last = d;
+        }
+        r.streakDays = (int) runBest;
+
+        // longest session: consecutive plays with <=1h gap count as one sitting
+        List<HistoryDiary.Entry> qual = new ArrayList<>();
+        for (HistoryDiary.Entry e : cur) if (countsAsPlay(e)) qual.add(e);
+        qual.sort((a, b) -> Long.compare(a.ts, b.ts));
+        long bestSec = 0, sess = 0, prevTs = -1;
+        for (HistoryDiary.Entry e : qual) {
+            boolean same = prevTs >= 0 && (e.ts - prevTs) <= 3600_000L;
+            sess = same ? sess + e.sec : e.sec;
+            if (sess > bestSec) bestSec = sess;
+            prevTs = e.ts;
+        }
+        r.longestSessionSec = bestSec;
+
+        // skip rate: % of >5s plays that didn't qualify
+        long playN = 0, skipN = 0;
+        for (HistoryDiary.Entry e : cur) {
+            if (e.sec <= 5) continue;
+            if (countsAsPlay(e)) playN++; else { skipN++; }
+        }
+        r.skipRate = (int) (skipN * 100 / Math.max(1L, playN + skipN));
+
+        // replay king + most-skipped track
+        Map<String, Long> trackCount = new HashMap<>();
+        Map<String, Long> skipCount = new HashMap<>();
+        for (HistoryDiary.Entry e : cur) {
+            if (e.sec <= 5) continue;
+            if (countsAsPlay(e)) bump(trackCount, e.title);
+            else bump(skipCount, e.title);
+        }
+        for (Map.Entry<String, Long> m : trackCount.entrySet())
+            if (m.getKey() != null && !m.getKey().isEmpty()
+                    && m.getValue() > r.replayKingPlays) {
+                r.replayKingPlays = m.getValue(); r.replayKing = m.getKey();
+            }
+        for (Map.Entry<String, Long> m : skipCount.entrySet())
+            if (m.getKey() != null && !m.getKey().isEmpty()
+                    && m.getValue() > r.mostSkippedPlays) {
+                r.mostSkippedPlays = m.getValue(); r.mostSkipped = m.getKey();
+            }
+
+        // discovery vs comfort: plays by artists unseen in the previous period
+        java.util.Set<String> prevArtists = new java.util.HashSet<>();
+        for (HistoryDiary.Entry e : prev) if (!e.artist.isEmpty()) prevArtists.add(e.artist);
+        long discovered = 0, comfort = 0;
+        for (HistoryDiary.Entry e : cur) {
+            if (!countsAsPlay(e) || e.artist.isEmpty()) continue;
+            if (prevArtists.contains(e.artist)) comfort++; else discovered++;
+        }
+        r.discoveryPct = (int) (discovered * 100 / Math.max(1L, discovered + comfort));
+    }
+
+    /** local midnight epoch ms for a timestamp */
+    private static long midnight(long ts) {
+        Calendar c = Calendar.getInstance();
+        c.setTimeInMillis(ts);
+        c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0);
+        c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0);
+        return c.getTimeInMillis();
     }
 
     /** format seconds-of-hours as "1h 05m" / "42m" */

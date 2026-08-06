@@ -284,4 +284,42 @@ public final class Recap {
         if (d == 0) return "—";
         return (d > 0 ? "▲ +" : "▼ −") + Math.abs(d) + " " + unit;
     }
+
+    /** the share card Nova actually sends friends: "my week in marimo" +
+     *  the headline stats + each listening-behaviour stat on its own line. */
+    public static String shareCard(int period, long[] w, Result r) {
+        String pn = period == MODE_WEEK ? "week"
+                : period == MODE_MONTH ? "month" : "year";
+        StringBuilder sb = new StringBuilder("my ").append(pn).append(" in marimo");
+        java.text.SimpleDateFormat ym = new java.text.SimpleDateFormat(
+                "MMMM yyyy", java.util.Locale.US);
+        java.text.SimpleDateFormat y = new java.text.SimpleDateFormat(
+                "yyyy", java.util.Locale.US);
+        if (period == MODE_MONTH)
+            sb.append(" (").append(ym.format(new java.util.Date(w[0]))).append(')');
+        else if (period == MODE_YEAR)
+            sb.append(" (").append(y.format(new java.util.Date(w[0]))).append(')');
+
+        sb.append('\n').append(r.tracks).append(" tracks · ")
+                .append(fmtHours(r.totalSec, true)).append(" · ")
+                .append(r.artists).append(" artists · ")
+                .append(r.albums).append(" albums");
+        if (r.persona != null && !r.persona.isEmpty())
+            sb.append("\nmostly a ").append(r.persona);
+        if (r.streakDays > 0)
+            sb.append("\nstreak: ").append(r.streakDays).append(" days in a row");
+        if (r.longestSessionSec > 0)
+            sb.append("\nlongest session: ").append(fmtHours(r.longestSessionSec, true));
+        if (r.skipRate > 0)
+            sb.append("\nskipped ").append(r.skipRate).append("% of starts");
+        if (r.replayKingPlays >= 2)
+            sb.append("\nlooped \"").append(r.replayKing).append("\" ×")
+                    .append(r.replayKingPlays);
+        if (r.mostSkippedPlays > 0)
+            sb.append("\nmost-skipped \"").append(r.mostSkipped).append('"');
+        sb.append('\n').append(r.discoveryPct).append("% new artists");
+        if (!r.topArtists.isEmpty())
+            sb.append("\ntop artist: ").append(r.topArtists.get(0).name);
+        return sb.toString();
+    }
 }

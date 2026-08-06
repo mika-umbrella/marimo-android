@@ -228,4 +228,24 @@ public class RecapTest {
         Recap.Result r = Recap.compute(cur, prev, Recap.MODE_WEEK);
         assertEquals(66, r.discoveryPct);       // 2/3 plays to new artists
     }
+
+    @Test public void shareCardIsMyNotYourAndHasBehaviour() {
+        List<HistoryDiary.Entry> cur = new ArrayList<>();
+        Calendar c = Calendar.getInstance();
+        c.set(2026, Calendar.AUGUST, 1, 12, 0, 0);
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "A", "a", "Loop Hit"));
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "A", "a", "Loop Hit"));
+        cur.add(entry(c.getTimeInMillis(), 200, 300_000, "A", "a", "Loop Hit"));
+        long[] w = {c.getTimeInMillis() - 86_400_000L, c.getTimeInMillis()};
+        Recap.Result r = Recap.compute(cur, new ArrayList<>(), Recap.MODE_WEEK);
+
+        String card = Recap.shareCard(Recap.MODE_WEEK, w, r);
+        assertTrue(card.startsWith("my week in marimo"));
+        assertFalse(card.contains("your week"));
+        assertTrue(card.contains("3 tracks"));
+        assertTrue(card.contains("looped \"Loop Hit\" ×3"));
+        assertTrue(card.contains("% new artists"));
+        // behaviour stats are on their own lines
+        assertTrue(card.contains("\n"));
+    }
 }

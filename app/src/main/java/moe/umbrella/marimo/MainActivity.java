@@ -733,10 +733,10 @@ public class MainActivity extends Activity {
             recapBody.addView(e);
             return;
         }
-        addTopN("top artists", r.topArtists);
-        addTopN("top albums", r.topAlbums);
-        addTopN("top tracks", r.topTracks);
-        addShare(r);
+        addTopN(KIND_ARTIST, "top artists", r.topArtists);
+        addTopN(KIND_ALBUM, "top albums", r.topAlbums);
+        addTopN(KIND_TRACK, "top tracks", r.topTracks);
+        addShare(r, w);
     }
 
     private void stylePeriodButtons() {
@@ -845,20 +845,34 @@ public class MainActivity extends Activity {
         recapBody.addView(row);
     }
 
-    private void addTopN(String header, List<Recap.Row> rows) {
+    private static final int KIND_ARTIST = 0, KIND_ALBUM = 1, KIND_TRACK = 2;
+    /** in-memory art cache for recap rows: "kind:name" -> bitmap */
+    private final java.util.Map<String, Bitmap> recapArt = new java.util.HashMap<>();
+    /** in-memory last.fm artist-photo cache: artist -> bitmap */
+    private static final java.util.Map<String, Bitmap> lfArtistArt = new java.util.HashMap<>();
+    private static final java.util.Set<String> lfArtistFetching =
+            new java.util.HashSet<>();
+
+    private void addTopN(int kind, String header, List<Recap.Row> rows) {
         if (rows == null || rows.isEmpty()) return;
         addSectionLabel(header);
         long max = 1;
         for (Recap.Row r : rows) if (r.count > max) max = r.count;
         int rank = 1;
-        for (Recap.Row r : rows) addTopNRow(rank++, r.name, r.count, max);
+        for (Recap.Row r : rows) {
+            ImageView art = addTopNRow(r, rank++, max, artFor(kind, r.name));
+            if (kind == KIND_ARTIST && art != null)
+                fetchArtistArt(art, r.name);
+        }
     }
 
-    private void addTopNRow(int rank, String name, long count, long max) {
+    /** build one top-N row with a square art thumbnail; returns the view the
+     *  last.fm artist-photo loader can later populate (or null for non-art). */
+    private ImageView addTopNRow(Recap.Row r, int rank, long max, Bitmap art) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setBackgroundColor(Theme.panel());
-        card.setPadding(dp(12), dp(8), dp(12), dp(8));
+        card.setPadding(dp(10), dp(8), dp(12), dp(8));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -868,30 +882,164 @@ public class MainActivity extends Activity {
         LinearLayout l1 = new LinearLayout(this);
         l1.setOrientation(LinearLayout.HORIZONTAL);
         l1.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        TextView tv = mkText(rank + ". " + name, Theme.txt(), 13,
+
+        ImageView artView = new ImageView(this);
+        artView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        int size = dp(48);
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(size, size);
+        alp.setMargins(0, 0, dp(10), 0);
+        artView.setLayoutParams(alp);
+        if (art != null) {
+            artView.setImageBitmap(art);
+        } else {
+            artView.setImageBitmap(placeholderBitmap(r.name));
+        }
+        l1.addView(artView);
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        l1.addView(col, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        TextView tv = mkText(rank + ". " + r.name, Theme.txt(), 13,
                 android.graphics.Typeface.BOLD);
         tv.setSingleLine(true);
         tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        l1.addView(tv, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        TextView ct = mkText(String.valueOf(count), Theme.dim(), 12, 0);
-        l1.addView(ct);
+        col.addView(tv);
+        TextView cnt = mkText(r.count + (r.count == 1 ? " play" : " plays"),
+                Theme.dim(), 11, 0);
+        col.addView(cnt);
+
+        TextView rt = mkText(String.valueOf(r.count), Theme.acc(), 12,
+                android.graphics.Typeface.BOLD);
+        l1.addView(rt);
         card.addView(l1);
 
         LinearLayout track = new LinearLayout(this);
         track.setOrientation(LinearLayout.HORIZONTAL);
         track.setBackgroundColor(Theme.rowBg());
         View fill = new View(this);
-        float frac = max > 0 ? (float) count / max : 0f;
+        float frac = max > 0 ? (float) r.count / max : 0f;
         fill.setBackgroundColor(Theme.acc());
         View gap = new View(this);
-        track.addView(fill, new LinearLayout.LayoutParams(0, dp(5),
+        track.addView(fill, new LinearLayout.LayoutParams(0, dp(4),
                 Math.max(0.02f, frac)));
-        track.addView(gap, new LinearLayout.LayoutParams(0, dp(5),
+        track.addView(gap, new LinearLayout.LayoutParams(0, dp(4),
                 Math.max(0.02f, 1f - frac)));
         card.addView(track, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(5)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(4)));
         recapBody.addView(card);
+        return artView;
+    }
+
+    /** resolve a row's art from a representative library track (cached); the
+     *  recap aggregator only has names, so we match the first known track. */
+    private Bitmap artFor(int kind, String name) {
+        if (name == null || name.isEmpty()) return null;
+        String key = kind + ":" + name;
+        synchronized (recapArt) {
+            if (recapArt.containsKey(key)) return recapArt.get(key);
+        }
+        Bitmap b = null;
+        synchronized (knownTracks) {
+            for (Track t : knownTracks.values()) {
+                String f = kind == KIND_ARTIST ? t.artist
+                        : kind == KIND_ALBUM ? t.album
+                        : (t.title.isEmpty() ? t.name : t.title);
+                if (name.equals(f)) { b = loadArt(t.token, null); break; }
+            }
+        }
+        synchronized (recapArt) { recapArt.put(key, b); }
+        return b;
+    }
+
+    /** a soft placeholder square (panel bg + the leading char) when no art */
+    private Bitmap placeholderBitmap(String name) {
+        int size = dp(48);
+        Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas c = new android.graphics.Canvas(bmp);
+        c.drawColor(Theme.rowBg());
+        String ch = (name == null || name.isEmpty()) ? "?" : name.substring(0, 1);
+        android.graphics.Paint p = new android.graphics.Paint(
+                android.graphics.Paint.ANTI_ALIAS_FLAG);
+        p.setColor(Theme.dim());
+        p.setTextSize(size * 0.5f);
+        p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        p.setTextAlign(android.graphics.Paint.Align.CENTER);
+        android.graphics.Rect r = new android.graphics.Rect();
+        p.getTextBounds(ch, 0, ch.length(), r);
+        float y = (size + r.height()) / 2f;
+        c.drawText(ch, size / 2f, y, p);
+        return bmp;
+    }
+
+    /** async last.fm artist photo, populates the row's thumbnail when it lands */
+    private void fetchArtistArt(final ImageView artView, final String artist) {
+        if (artist == null || artist.isEmpty()) return;
+        synchronized (lfArtistArt) {
+            if (lfArtistArt.containsKey(artist)) {
+                artView.setImageBitmap(lfArtistArt.get(artist));
+                return;
+            }
+        }
+        synchronized (lfArtistFetching) {
+            if (lfArtistFetching.contains(artist)) return;   // in flight
+            lfArtistFetching.add(artist);
+        }
+        new Thread(() -> {
+            Bitmap b = lastFmArtistImage(artist);
+            synchronized (lfArtistFetching) { lfArtistFetching.remove(artist); }
+            if (b != null) {
+                synchronized (lfArtistArt) { lfArtistArt.put(artist, b); }
+                runOnUiThread(() -> artView.setImageBitmap(b));
+            }
+        }, "lf-art-" + artist).start();
+    }
+
+    /** last.fm artist.getinfo -> the artist's photo (or null) */
+    private Bitmap lastFmArtistImage(String artist) {
+        try {
+            String key = Scrobbler.current()[0];
+            if (key == null || key.isEmpty()) return null;
+            String url = "https://ws.audioscrobbler.com/2.0/?method=artist.getinfo"
+                    + "&artist=" + java.net.URLEncoder.encode(artist, "UTF-8")
+                    + "&api_key=" + key + "&format=json";
+            String body = httpGet(url);
+            if (body == null) return null;
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("\"#text\":\"(https?://[^\"]+)\"").matcher(body);
+            String img = null;
+            while (m.find()) img = m.group(1);     /* last = largest */
+            if (img == null || img.isEmpty()) return null;
+            byte[] data = httpGetBytes(img);
+            if (data == null || data.length == 0) return null;
+            return decodeScaled(data, 300);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String httpGet(String url) throws Exception {
+        byte[] d = httpGetBytes(url);
+        return d == null ? null : new String(d, StandardCharsets.UTF_8);
+    }
+
+    private byte[] httpGetBytes(String url) throws Exception {
+        java.net.HttpURLConnection c =
+                (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        c.setConnectTimeout(6000);
+        c.setReadTimeout(10000);
+        c.setRequestProperty("User-Agent", "marimo-android/1.1");
+        int code = c.getResponseCode();
+        if (code != 200) { c.disconnect(); return null; }
+        try (java.io.InputStream is = c.getInputStream()) {
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
+            return bos.toByteArray();
+        } finally {
+            c.disconnect();
+        }
     }
 
     private void addListeningBehaviour(Recap.Result r) {
@@ -936,7 +1084,7 @@ public class MainActivity extends Activity {
         card.addView(row);
     }
 
-    private void addShare(Recap.Result r) {
+    private void addShare(Recap.Result r, long[] w) {
         android.widget.Button share = new android.widget.Button(this);
         share.setText("share");
         share.setTextSize(14);
@@ -945,12 +1093,7 @@ public class MainActivity extends Activity {
         lp.topMargin = dp(10);
         share.setLayoutParams(lp);
         share.setOnClickListener(v -> {
-            String prev = recapMode == Recap.MODE_WEEK ? "week"
-                    : recapMode == Recap.MODE_MONTH ? "month" : "year";
-            String card = "your " + prev + " in marimo: "
-                    + r.tracks + " tracks · " + fmtHours(r.totalSec)
-                    + (!r.topArtists.isEmpty()
-                            ? " · top artist " + r.topArtists.get(0).name : "");
+            String card = Recap.shareCard(recapMode, w, r);
             Intent i = new Intent(Intent.ACTION_SEND);
             i.setType("text/plain");
             i.putExtra(Intent.EXTRA_TEXT, card);

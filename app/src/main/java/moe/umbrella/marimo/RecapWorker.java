@@ -42,14 +42,14 @@ public class RecapWorker extends Worker {
             // silent by default; only the weekly gives a soft check-in
             if (period == Recap.MODE_WEEK) postCheckIn(ctx);
         } else {
-            postRecap(ctx, period, r);
+            postRecap(ctx, period, w, r);
         }
         // keep the chain alive for the next reset
         RecapScheduler.schedule(ctx, period);
         return Result.success();
     }
 
-    private void postRecap(Context ctx, int period, Recap.Result r) {
+    private void postRecap(Context ctx, int period, long[] w, Recap.Result r) {
         String pname = period == Recap.MODE_WEEK ? "week"
                 : period == Recap.MODE_MONTH ? "month" : "year";
         String title = "your " + pname + " in marimo";
@@ -69,7 +69,7 @@ public class RecapWorker extends Worker {
                 PendingIntent.FLAG_IMMUTABLE);
         Intent share = new Intent(Intent.ACTION_SEND);
         share.setType("text/plain");
-        share.putExtra(Intent.EXTRA_TEXT, title + ": " + card);
+        share.putExtra(Intent.EXTRA_TEXT, Recap.shareCard(period, w, r));
         PendingIntent sp = PendingIntent.getActivity(ctx, 1,
                 Intent.createChooser(share, "share your recap"),
                 PendingIntent.FLAG_IMMUTABLE);

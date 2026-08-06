@@ -224,8 +224,10 @@ public class PlaybackService extends MediaSessionService {
             }
             @Override public void onMediaItemTransition(
                     androidx.media3.common.MediaItem mi, int reason) {
-                if (activeTrack != null)
+                if (activeTrack != null) {
                     Scrobbler.scrobble(activeTrack, activePlayMs);
+                    HistoryDiary.log(activeTrack, activePlayMs);
+                }
                 activeTrack = null;
                 activePlayMs = 0;
                 lastTickPos = 0;
@@ -241,6 +243,7 @@ public class PlaybackService extends MediaSessionService {
                         && activeTrack != null) {
                     /* reached the end of the queue (no auto-next) — scrobble */
                     Scrobbler.scrobble(activeTrack, activePlayMs);
+                    HistoryDiary.log(activeTrack, activePlayMs);
                     activeTrack = null;
                 }
             }
@@ -347,6 +350,7 @@ public class PlaybackService extends MediaSessionService {
         super.onCreate();
         ensureChannel();
         instance = this;
+        HistoryDiary.configure(getApplicationContext());
         player = makePlayer();
         session = new MediaSession.Builder(this, player)
                 .setSessionActivity(android.app.PendingIntent.getActivity(this, 0,

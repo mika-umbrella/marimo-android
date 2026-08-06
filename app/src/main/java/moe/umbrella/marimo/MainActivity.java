@@ -79,6 +79,8 @@ public class MainActivity extends Activity {
     private AlbumAdapter adapter;
     private TextView status, folderName;
     private LinearLayout screenLibrary, screenPlayer, screenQueue, screenSettings, screenScrobble;
+    private LinearLayout screenRecap, recapBody;
+    private int recapMode = Recap.MODE_WEEK;
     private android.widget.EditText etLfKey, etLfSession, etLbToken;
     private TextView pTrack, pArtist, pAlbum, pTime;
     private ImageView pArt;
@@ -160,6 +162,8 @@ public class MainActivity extends Activity {
         screenQueue = findViewById(R.id.screen_queue);
         screenSettings = findViewById(R.id.screen_settings);
         screenScrobble = findViewById(R.id.screen_scrobble);
+        screenRecap = findViewById(R.id.screen_recap);
+        recapBody = findViewById(R.id.recap_body);
         etLfKey = findViewById(R.id.et_lf_key);
         etLfSession = findViewById(R.id.et_lf_session);
         etLbToken = findViewById(R.id.et_lb_token);
@@ -241,6 +245,20 @@ public class MainActivity extends Activity {
         });
         findViewById(R.id.set_rescan).setOnClickListener(v -> rescan());
         findViewById(R.id.set_scrobble).setOnClickListener(v -> showTab(4));
+        findViewById(R.id.set_recap).setOnClickListener(v -> showTab(5));
+        findViewById(R.id.btn_recap_back).setOnClickListener(v -> showTab(3));
+        findViewById(R.id.recap_week).setOnClickListener(v -> {
+            recapMode = Recap.MODE_WEEK;
+            renderRecap();
+        });
+        findViewById(R.id.recap_month).setOnClickListener(v -> {
+            recapMode = Recap.MODE_MONTH;
+            renderRecap();
+        });
+        findViewById(R.id.recap_year).setOnClickListener(v -> {
+            recapMode = Recap.MODE_YEAR;
+            renderRecap();
+        });
         findViewById(R.id.btn_scrobble_back).setOnClickListener(v -> showTab(3));
         findViewById(R.id.eye_lf_key).setOnClickListener(v -> toggleMask(etLfKey, findViewById(R.id.eye_lf_key)));
         findViewById(R.id.eye_lf_session).setOnClickListener(v -> toggleMask(etLfSession, findViewById(R.id.eye_lf_session)));
@@ -294,6 +312,8 @@ public class MainActivity extends Activity {
                 prefs.getString("lb_token", ""));
         applyTheme();
         startBgLoop();
+        RecapScheduler.scheduleAll(this);
+        requestRecapPermission();
 
         String saved = prefs.getString(KEY_TREE, null);
         if (saved != null) {
@@ -373,6 +393,11 @@ public class MainActivity extends Activity {
         Ui.panelPress(findViewById(R.id.set_pick));
         Ui.panelPress(findViewById(R.id.set_rescan));
         Ui.panelPress(findViewById(R.id.set_scrobble));
+        Ui.panelPress(findViewById(R.id.set_recap));
+        Ui.panelPress(findViewById(R.id.btn_recap_back));
+        Ui.panelPress(findViewById(R.id.recap_week));
+        Ui.panelPress(findViewById(R.id.recap_month));
+        Ui.panelPress(findViewById(R.id.recap_year));
         Ui.panelPress(findViewById(R.id.set_theme));
         Ui.panelPress(findViewById(R.id.btn_settings_back));
         Ui.tint(findViewById(R.id.btn_up), 0);
@@ -393,6 +418,9 @@ public class MainActivity extends Activity {
         Ui.text(findViewById(R.id.set_pick), 0);
         Ui.text(findViewById(R.id.set_rescan), 0);
         Ui.text(findViewById(R.id.set_scrobble), 0);
+        Ui.text(findViewById(R.id.set_recap), 0);
+        Ui.text(findViewById(R.id.title_recap), 2);
+        Ui.tint(findViewById(R.id.btn_recap_back), 0);
         Ui.text(findViewById(R.id.set_theme), 0);
         Ui.press(findViewById(R.id.p_play));
         Ui.press(findViewById(R.id.p_prev));
@@ -434,11 +462,25 @@ public class MainActivity extends Activity {
             showTab(0);
             return;
         }
+        if (tab == 5) {                    /* recap screen -> settings */
+            showTab(3);
+            return;
+        }
         super.onBackPressed();
     }
 
     @Override
     protected void onStop() { super.onStop(); stopBgLoop(); }
+
+    /** ask for POST_NOTIFICATIONS on 13+ (recap reset notifications) */
+    private void requestRecapPermission() {
+        if (android.os.Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                        != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 8);
+        }
+    }
 
     private void startBgLoop() {
         if (bgWorker != null) return;
@@ -656,8 +698,244 @@ public class MainActivity extends Activity {
         screenQueue.setVisibility(t == 2 ? View.VISIBLE : View.GONE);
         screenSettings.setVisibility(t == 3 ? View.VISIBLE : View.GONE);
         screenScrobble.setVisibility(t == 4 ? View.VISIBLE : View.GONE);
+        screenRecap.setVisibility(t == 5 ? View.VISIBLE : View.GONE);
         if (t == 4) populateScrobble();
+        if (t == 5) renderRecap();
         if (t == 2) refreshQueueList();
+    }
+
+    /* ============================ recap screen ============================ */
+
+    private void renderRecap() {
+        HistoryDiary.configure(this);   /* dir may not be set if the service never ran */
+        long[] w = Recap.windows(recapMode, System.currentTimeMillis());
+        List<HistoryDiary.Entry> cur = HistoryDiary.forWindow(w[0], w[1]);
+        List<HistoryDiary.Entry> prev = HistoryDiary.forWindow(w[2], w[3]);
+        Recap.Result r = Recap.compute(cur, prev, recapMode);
+
+        String title = recapMode == Recap.MODE_WEEK ? "your week in marimo"
+                : recapMode == Recap.MODE_MONTH ? "your month in marimo"
+                : "your year in marimo";
+        ((TextView) findViewById(R.id.title_recap)).setText(title);
+        stylePeriodButtons();
+
+        recapBody.removeAllViews();
+        addSectionLabel(fmtRange(w[0], w[1]));
+        addStatRow(r);
+        addDeltaLine(r);
+        addBars(r);
+        if (r.empty) {
+            TextView e = mkText("not enough plays to recap yet — go listen to something ♪",
+                    Theme.sub(), 13, 0);
+            e.setGravity(android.view.Gravity.CENTER);
+            e.setPadding(0, dp(28), 0, 0);
+            recapBody.addView(e);
+            return;
+        }
+        addTopN("top artists", r.topArtists);
+        addTopN("top albums", r.topAlbums);
+        addTopN("top tracks", r.topTracks);
+        addShare(r);
+    }
+
+    private void stylePeriodButtons() {
+        android.widget.Button wk = findViewById(R.id.recap_week);
+        android.widget.Button mo = findViewById(R.id.recap_month);
+        android.widget.Button yr = findViewById(R.id.recap_year);
+        stylePeriodBtn(wk, recapMode == Recap.MODE_WEEK);
+        stylePeriodBtn(mo, recapMode == Recap.MODE_MONTH);
+        stylePeriodBtn(yr, recapMode == Recap.MODE_YEAR);
+    }
+
+    private void stylePeriodBtn(android.widget.Button b, boolean active) {
+        b.setTextColor(active ? Theme.panel() : Theme.sub());
+        b.setBackgroundColor(active ? Theme.acc() : Theme.panel());
+    }
+
+    private void addSectionLabel(String s) {
+        TextView tv = mkText(s, Theme.sub(), 12, android.graphics.Typeface.BOLD);
+        tv.setLetterSpacing(0.08f);
+        tv.setPadding(dp(4), dp(14), dp(4), dp(6));
+        recapBody.addView(tv);
+    }
+
+    private void addStatRow(Recap.Result r) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setBackgroundColor(Theme.panel());
+        row.setPadding(dp(8), dp(12), dp(8), dp(12));
+        row.addView(statCol(fmtHours(r.totalSec), "hours"));
+        row.addView(statCol(String.valueOf(r.tracks), "tracks"));
+        row.addView(statCol(String.valueOf(r.artists), "artists"));
+        row.addView(statCol(String.valueOf(r.albums), "albums"));
+        recapBody.addView(row);
+    }
+
+    private LinearLayout statCol(String val, String lab) {
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setGravity(android.view.Gravity.CENTER);
+        TextView v = mkText(val, Theme.acc(), 18, android.graphics.Typeface.BOLD);
+        TextView l = mkText(lab, Theme.sub(), 11, 0);
+        col.addView(v);
+        col.addView(l);
+        return col;
+    }
+
+    private void addDeltaLine(Recap.Result r) {
+        long dur = r.hours - r.hoursPrev, dt = r.tracks - r.tracksPrev;
+        if (dur == 0 && dt == 0) return;
+        String prevLab = recapMode == Recap.MODE_WEEK ? "vs last week"
+                : recapMode == Recap.MODE_MONTH ? "vs last month" : "vs last year";
+        StringBuilder sb = new StringBuilder(prevLab + "  ");
+        appendDelta(sb, dt, "tracks");
+        sb.append(" · ");
+        appendDelta(sb, dur, "hours");
+        TextView tv = mkText(sb.toString(), Theme.sub(), 12, 0);
+        tv.setPadding(dp(4), dp(8), dp(4), dp(4));
+        recapBody.addView(tv);
+    }
+
+    private void appendDelta(StringBuilder sb, long d, String unit) {
+        if (d > 0) sb.append("▲ +").append(d).append(' ').append(unit);
+        else if (d < 0) sb.append("▼ −").append(-d).append(' ').append(unit);
+        else sb.append("— ").append(unit);
+    }
+
+    private void addBars(Recap.Result r) {
+        long[] bars = r.bars;
+        if (bars == null || bars.length == 0) return;
+        long max = 1;
+        for (long b : bars) if (b > max) max = b;
+        addSectionLabel("plays by " + (recapMode == Recap.MODE_WEEK ? "day"
+                : recapMode == Recap.MODE_MONTH ? "week" : "month"));
+        String[] labels = recapMode == Recap.MODE_WEEK
+                ? new String[]{"Su","Mo","Tu","We","Th","Fr","Sa"}
+                : recapMode == Recap.MODE_MONTH
+                ? new String[]{"wk1","wk2","wk3","wk4","wk5"}
+                : new String[]{"J","F","M","A","M","J","J","A","S","O","N","D"};
+        for (int i = 0; i < bars.length; i++)
+            addBar(labels[i], (float) bars[i] / max, Theme.acc());
+    }
+
+    private void addBar(String label, float frac, int color) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        LinearLayout cont = new LinearLayout(this);
+        cont.setOrientation(LinearLayout.HORIZONTAL);
+        cont.setBackgroundColor(Theme.rowBg());
+        View fill = new View(this);
+        fill.setBackgroundColor(color);
+        View gap = new View(this);
+        cont.addView(fill, new LinearLayout.LayoutParams(0, dp(6),
+                Math.max(0.02f, frac)));
+        cont.addView(gap, new LinearLayout.LayoutParams(0, dp(6),
+                Math.max(0.02f, 1f - frac)));
+        TextView lab = mkText(label, Theme.sub(), 11, 0);
+        lab.setWidth(dp(26));
+        row.addView(lab);
+        row.addView(cont, new LinearLayout.LayoutParams(0, dp(6), 1));
+        recapBody.addView(row);
+    }
+
+    private void addTopN(String header, List<Recap.Row> rows) {
+        if (rows == null || rows.isEmpty()) return;
+        addSectionLabel(header);
+        long max = 1;
+        for (Recap.Row r : rows) if (r.count > max) max = r.count;
+        int rank = 1;
+        for (Recap.Row r : rows) addTopNRow(rank++, r.name, r.count, max);
+    }
+
+    private void addTopNRow(int rank, String name, long count, long max) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundColor(Theme.panel());
+        card.setPadding(dp(12), dp(8), dp(12), dp(8));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, 0, 0, dp(8));
+        card.setLayoutParams(lp);
+
+        LinearLayout l1 = new LinearLayout(this);
+        l1.setOrientation(LinearLayout.HORIZONTAL);
+        l1.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView tv = mkText(rank + ". " + name, Theme.txt(), 13,
+                android.graphics.Typeface.BOLD);
+        tv.setSingleLine(true);
+        tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        l1.addView(tv, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        TextView ct = mkText(String.valueOf(count), Theme.dim(), 12, 0);
+        l1.addView(ct);
+        card.addView(l1);
+
+        LinearLayout track = new LinearLayout(this);
+        track.setOrientation(LinearLayout.HORIZONTAL);
+        track.setBackgroundColor(Theme.rowBg());
+        View fill = new View(this);
+        float frac = max > 0 ? (float) count / max : 0f;
+        fill.setBackgroundColor(Theme.acc());
+        View gap = new View(this);
+        track.addView(fill, new LinearLayout.LayoutParams(0, dp(5),
+                Math.max(0.02f, frac)));
+        track.addView(gap, new LinearLayout.LayoutParams(0, dp(5),
+                Math.max(0.02f, 1f - frac)));
+        card.addView(track, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(5)));
+        recapBody.addView(card);
+    }
+
+    private void addShare(Recap.Result r) {
+        android.widget.Button share = new android.widget.Button(this);
+        share.setText("share");
+        share.setTextSize(14);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        lp.topMargin = dp(10);
+        share.setLayoutParams(lp);
+        share.setOnClickListener(v -> {
+            String prev = recapMode == Recap.MODE_WEEK ? "week"
+                    : recapMode == Recap.MODE_MONTH ? "month" : "year";
+            String card = "your " + prev + " in marimo: "
+                    + r.tracks + " tracks · " + fmtHours(r.totalSec)
+                    + (!r.topArtists.isEmpty()
+                            ? " · top artist " + r.topArtists.get(0).name : "");
+            Intent i = new Intent(Intent.ACTION_SEND);
+            i.setType("text/plain");
+            i.putExtra(Intent.EXTRA_TEXT, card);
+            startActivity(Intent.createChooser(i, "share your recap"));
+        });
+        Ui.press(share);
+        recapBody.addView(share);
+    }
+
+    private TextView mkText(String s, int color, float sp, int style) {
+        TextView tv = new TextView(this);
+        tv.setText(s);
+        tv.setTextColor(color);
+        tv.setTextSize(sp);
+        tv.setTypeface(null, style);
+        return tv;
+    }
+
+    private int dp(float v) {
+        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private String fmtHours(long totalSeconds) {
+        long h = totalSeconds / 3600, m = (totalSeconds % 3600) / 60;
+        if (h == 0) return m + "m";
+        return h + "h " + String.format("%02dm", m);
+    }
+
+    private String fmtRange(long a, long b) {
+        java.text.SimpleDateFormat f = new java.text.SimpleDateFormat(
+                "MMM d", java.util.Locale.US);
+        return f.format(new java.util.Date(a)) + " – "
+                + f.format(new java.util.Date(b - 1));
     }
 
     /* ---------------- library / album grouping ---------------- */

@@ -105,7 +105,8 @@ static void test_tags(const char *dir)
             int tr = -1, dc = -1;
             if (l < 5) continue;
             ext = se->d_name + l - 5;
-            if (strcasecmp(ext, ".flac") && strcasecmp(ext, ".mp3")) continue;
+            if (strcasecmp(ext, ".flac") && strcasecmp(ext, ".mp3") &&
+                strcasecmp(ext, ".ogg") && strcasecmp(ext, ".opus")) continue;
             snprintf(file, sizeof file, "%s/%s", sub, se->d_name);
             /* path variant */
             CHECK(tag_read_meta(file, &m) == 0, "tag_read_meta path");

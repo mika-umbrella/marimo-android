@@ -561,18 +561,35 @@ static int ogg_parse(FILE *f, Meta *meta, int *track, int *disc)
     unsigned char *buf;
     long end, blen;
     int any = 0;
+    long rate = 48000;   /* Opus default; Vorbis overrides from id header */
     fseek(f, 0, SEEK_END); end = ftell(f); fseek(f, 0, SEEK_SET);
     blen = end < 131072 ? end : 131072;            /* OpusTags is early + small */
     if (blen <= 0) return -1;
     buf = (unsigned char *)malloc((size_t)blen);
     if (fread(buf, 1, (size_t)blen, f) != (size_t)blen) { free(buf); return -1; }
-    for (long i = 0; i + 8 <= blen; i++)
+    for (long i = 0; i + 8 <= blen; i++) {
+        /* Opus: "OpusTags" comment packet (8-byte magic, then comments). */
         if (!memcmp(buf + i, "OpusTags", 8)) {
             apply_comments(buf + i + 8, (int)(blen - i - 8), meta, track, disc, &any);
-            break;
+            continue;
         }
+        /* Vorbis: comment packet is \x03 "vorbis" (7 bytes) + framing, then
+         * the same vorbis-format comment block (vendor_len + comments). */
+        if (!memcmp(buf + i, "\x03vorbis", 7)) {
+            apply_comments(buf + i + 7, (int)(blen - i - 7), meta, track, disc, &any);
+            continue;
+        }
+        /* Vorbis identification header: \x01 "vorbis", then version(4),
+         * channels(1), sample_rate(4 LE) at offset +12. Capture the rate so
+         * granule→ms is correct for Vorbis (commonly 44100, not 48000). */
+        if (!memcmp(buf + i, "\x01vorbis", 7)) {
+            if (i + 16 <= blen)
+                rate = (long)get_u32le(buf + i + 12);
+            continue;
+        }
+    }
     free(buf);
-    /* duration: granule of the last Ogg page divided by 48k */
+    /* duration: granule of the last Ogg page / sample rate. */
     if (meta) {
         unsigned char h[27];
         unsigned long long gran = 0;
@@ -583,9 +600,10 @@ static int ogg_parse(FILE *f, Meta *meta, int *track, int *disc)
             if (memcmp(h, "OggS", 4)) continue;
             gran = get_u64le(h + 6);
         }
-        if (gran > 0) meta->duration_ms = (int)(gran * 1000 / 48000);
+        if (gran > 0 && rate > 0)
+            meta->duration_ms = (int)(gran * 1000 / rate);
     }
-    return (any || meta->duration_ms > 0) ? 0 : -1;
+    return (any || (meta && meta->duration_ms > 0)) ? 0 : -1;
 }
 
 /* ---------------- MP4 / M4A ---------------- */

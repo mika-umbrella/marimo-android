@@ -1033,7 +1033,7 @@ public class MainActivity extends Activity {
                 (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
         c.setConnectTimeout(6000);
         c.setReadTimeout(10000);
-        c.setRequestProperty("User-Agent", "marimo-android/1.1");
+        c.setRequestProperty("User-Agent", "marimo-android/1.2");
         int code = c.getResponseCode();
         if (code != 200) { c.disconnect(); return null; }
         try (java.io.InputStream is = c.getInputStream()) {

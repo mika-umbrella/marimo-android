@@ -233,13 +233,14 @@ public class MainActivity extends Activity {
         });
         setupQueueGestures();
 
-        /* near-square screens (Titan 2 Elite 1080x1200) drop the big art
-         * and the A-Z strip so the list/player get real room */
+        /* near-square screens (Titan 2 Elite 1080x1200) drop the A-Z strip so
+         * the list keeps its width. the player's cover stays: it only ever
+         * gets the leftover space (layout_weight 1), so it cannot squeeze the
+         * text/controls, and a short screen just shrinks it toward nothing. */
         android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
         float ratio = (float) Math.min(dm.widthPixels, dm.heightPixels)
                 / Math.max(dm.widthPixels, dm.heightPixels);
         if (ratio > 0.86f) {
-            pArt.setVisibility(View.GONE);
             findViewById(R.id.letterbar).setVisibility(View.GONE);
         }
 
@@ -1055,7 +1056,7 @@ public class MainActivity extends Activity {
                 (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
         c.setConnectTimeout(6000);
         c.setReadTimeout(10000);
-        c.setRequestProperty("User-Agent", "marimo-android/1.2.1");
+        c.setRequestProperty("User-Agent", "marimo-android/1.2.2");
         int code = c.getResponseCode();
         if (code != 200) { c.disconnect(); return null; }
         try (java.io.InputStream is = c.getInputStream()) {

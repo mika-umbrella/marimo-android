@@ -1,6 +1,7 @@
 package moe.umbrella.marimo;
 
 import android.content.Intent;
+import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.IBinder;
 
@@ -43,6 +44,54 @@ public class PlaybackService extends MediaSessionService {
 
     private ExoPlayer player;
     private MediaSession session;
+
+    /* album art for the notification + the system media controls. the bytes are
+     * shared per album folder (one cover serves the whole album) and capped, so
+     * a 600-track queue can't turn into a bitmap-per-track memory pile — the
+     * same OOM lesson that made the list load covers lazily. */
+    private final java.util.HashMap<String, byte[]> queueArt = new java.util.HashMap<>();
+    private long queueArtBytes;
+    private static final long QUEUE_ART_BUDGET = 6L * 1024 * 1024;
+    private Bitmap widgetArt;          /* one decoded cover, for the notification */
+    private String widgetArtKey = "";
+
+    /** cover bytes for this track from the disk art cache (the scan prewarms one
+     *  JPEG per album), shared per album and bounded by QUEUE_ART_BUDGET. */
+    private byte[] artBytesFor(Track t) {
+        String key = LibraryCache.artKey(t.token);
+        if (queueArt.containsKey(key)) return queueArt.get(key);
+        byte[] b = null;
+        try {
+            if (queueArtBytes < QUEUE_ART_BUDGET
+                    && LibraryCache.hasArtOnDisk(this, t.token)) {
+                java.io.File f = LibraryCache.artFile(this, t.token);
+                long n = f.length();
+                if (n > 0 && queueArtBytes + n <= QUEUE_ART_BUDGET) {
+                    java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                    java.io.FileInputStream in = new java.io.FileInputStream(f);
+                    byte[] buf = new byte[8192];
+                    int r;
+                    while ((r = in.read(buf)) > 0) bos.write(buf, 0, r);
+                    in.close();
+                    b = bos.toByteArray();
+                    queueArtBytes += b.length;
+                }
+            }
+        } catch (Exception e) { b = null; }
+        queueArt.put(key, b);          /* remembers the miss too — one stat per album */
+        return b;
+    }
+
+    /** the cover for the notification's large icon. only ever one decoded bitmap
+     *  is held, because the notification only shows the current track. */
+    private Bitmap widgetArtFor(Track t) {
+        String key = LibraryCache.artKey(t.token);
+        if (widgetArt != null && key.equals(widgetArtKey)) return widgetArt;
+        widgetArt = LibraryCache.readArt(this, t.token);
+        widgetArtKey = key;
+        return widgetArt;
+    }
+
     private android.os.Handler tickHandler;
     private Runnable ticker;
 
@@ -268,16 +317,24 @@ public class PlaybackService extends MediaSessionService {
         player = makePlayer();
         session.setPlayer(player);
         List<MediaItem> items = new ArrayList<>();
+        queueArt.clear();
+        queueArtBytes = 0;
         for (Track t : list) {
+            androidx.media3.common.MediaMetadata.Builder md =
+                    new androidx.media3.common.MediaMetadata.Builder()
+                            .setTitle(t.title.isEmpty() ? t.name : t.title)
+                            .setArtist(t.artist)
+                            .setAlbumTitle(t.album);
+            /* the platform's media controls (lockscreen / home widget) take the
+             * art from the item metadata — without this they show nothing */
+            byte[] art = artBytesFor(t);
+            if (art != null) md.setArtworkData(art,
+                    androidx.media3.common.MediaMetadata.PICTURE_TYPE_FRONT_COVER);
             items.add(new MediaItem.Builder()
                     .setUri(playUri(t.token))
                     .setMediaId(t.token)
                     .setTag(t)
-                    .setMediaMetadata(new androidx.media3.common.MediaMetadata.Builder()
-                            .setTitle(t.title.isEmpty() ? t.name : t.title)
-                            .setArtist(t.artist)
-                            .setAlbumTitle(t.album)
-                            .build())
+                    .setMediaMetadata(md.build())
                     .build());
         }
         player.setMediaItems(items,
@@ -481,6 +538,7 @@ public class PlaybackService extends MediaSessionService {
                 new androidx.core.app.NotificationCompat.Builder(this, "marimo_playback")
                         .setContentTitle(t.title.isEmpty() ? t.name : t.title)
                         .setContentText(t.artist)
+                        .setLargeIcon(widgetArtFor(t))
                         .setSmallIcon(android.R.drawable.ic_media_play)
                         .setContentIntent(pi)
                         .setOngoing(true)
@@ -520,16 +578,22 @@ public class PlaybackService extends MediaSessionService {
         List<Track> list;
         synchronized (tracks) { list = new ArrayList<>(tracks); }
         List<MediaItem> items = new ArrayList<>();
+        queueArt.clear();
+        queueArtBytes = 0;
         for (Track t : list) {
+            androidx.media3.common.MediaMetadata.Builder md =
+                    new androidx.media3.common.MediaMetadata.Builder()
+                            .setTitle(t.title.isEmpty() ? t.name : t.title)
+                            .setArtist(t.artist)
+                            .setAlbumTitle(t.album);
+            byte[] art = artBytesFor(t);
+            if (art != null) md.setArtworkData(art,
+                    androidx.media3.common.MediaMetadata.PICTURE_TYPE_FRONT_COVER);
             MediaItem mi = new MediaItem.Builder()
                     .setUri(playUri(t.token))
                     .setMediaId(t.token)
                     .setTag(t)
-                    .setMediaMetadata(new androidx.media3.common.MediaMetadata.Builder()
-                            .setTitle(t.title.isEmpty() ? t.name : t.title)
-                            .setArtist(t.artist)
-                            .setAlbumTitle(t.album)
-                            .build())
+                    .setMediaMetadata(md.build())
                     .build();
             items.add(mi);
         }

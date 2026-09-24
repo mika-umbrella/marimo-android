@@ -30,6 +30,11 @@ public class Scrobbler {
     private static volatile String lfUser = "";
     private static volatile String lbToken = "";
 
+    /* what the services last said back — logcat is unreadable on a device with
+     * no adb, so the scrobble screen shows this instead of the user guessing */
+    private static volatile String lastLf = "";
+    private static volatile String lastLb = "";
+
     /** set from the settings dialog */
     public static void configure(String lfKeyV, String lfSecretV, String lfSessionV,
                                  String lfUserV, String lbTokenV) {
@@ -52,6 +57,30 @@ public class Scrobbler {
 
     public static String[] current() {
         return new String[]{lfKey, lfSecret, lfSession, lfUser, lbToken};
+    }
+
+    /** one-line-per-service summary for the scrobble screen: what's configured,
+     *  and what each service last replied (a 4xx here is the whole story of a
+     *  "scrobbling doesn't work" report). */
+    public static String status() {
+        StringBuilder sb = new StringBuilder();
+        if (hasLf()) sb.append("last.fm: linked");
+        else if (lfKey.isEmpty()) sb.append("last.fm: no api key");
+        else sb.append("last.fm: no session key — tap \"log in with last.fm\"");
+        if (!lastLf.isEmpty()) sb.append("\nlast.fm last reply: ").append(lastLf);
+        sb.append('\n');
+        sb.append(hasLb() ? "listenbrainz: token set" : "listenbrainz: no token");
+        if (!hasLb()) sb.append(" (paste the token from listenbrainz.org/profile)");
+        if (!lastLb.isEmpty()) sb.append("\nlistenbrainz last reply: ").append(lastLb);
+        return sb.toString();
+    }
+
+    /** "ok" or "400 <body>" — short enough for a phone status line */
+    private static String brief(int code, String body) {
+        if (code == 200) return "ok (200)";
+        String s = body == null ? "" : body.replaceAll("\\s+", " ").trim();
+        if (s.length() > 120) s = s.substring(0, 120) + "…";
+        return code + (s.isEmpty() ? "" : " " + s);
     }
 
     /** call on track start — reports "now playing" to both services */
@@ -99,7 +128,9 @@ public class Scrobbler {
         p.put("artist", t.artist);
         p.put("track", t.title.isEmpty() ? t.name : t.title);
         p.put("album", t.album);
-        p.put("duration", String.valueOf(t.durationMs / 1000));
+        /* duration is optional on both calls — sending 0 for an unreadable tag
+         * risks last.fm rejecting the whole request for a bad parameter */
+        if (t.durationMs > 0) p.put("duration", String.valueOf(t.durationMs / 1000));
         p.put("api_key", lfKey);
         p.put("sk", lfSession);
         post(LF_API, p, true);
@@ -111,7 +142,7 @@ public class Scrobbler {
         p.put("artist", t.artist);
         p.put("track", t.title.isEmpty() ? t.name : t.title);
         p.put("album", t.album);
-        p.put("duration", String.valueOf(t.durationMs / 1000));
+        if (t.durationMs > 0) p.put("duration", String.valueOf(t.durationMs / 1000));
         p.put("timestamp", String.valueOf(System.currentTimeMillis() / 1000));
         p.put("api_key", lfKey);
         p.put("sk", lfSession);
@@ -186,12 +217,20 @@ public class Scrobbler {
     }
 
     private static void lbScrobble(Track t, long playedMs) {
-        String payload = "{\"listen_type\":\"single\",\"payload\":[{\"track_metadata\":{"
+        /* ListenBrainz REQUIRES listened_at on a 'single' listen — and rejects it
+         * on 'playing_now'. Without it the submit is a 400 and the listen is
+         * lost, which is exactly the symptom "playing now shows up on
+         * listenbrainz, the scrobble never does". duration_ms is optional, so
+         * only send it when the tag read actually gave us one. */
+        String payload = "{\"listen_type\":\"single\",\"payload\":[{\"listened_at\":"
+                + (System.currentTimeMillis() / 1000)
+                + ",\"track_metadata\":{"
                 + "\"track_name\":" + jq(t.title.isEmpty() ? t.name : t.title)
                 + ",\"artist_name\":" + jq(t.artist)
                 + ",\"release_name\":" + jq(t.album)
-                + ",\"additional_info\":{\"duration_ms\":" + t.durationMs
-                + ",\"media_player\":\"marimo\"}}}]}";
+                + ",\"additional_info\":{\"media_player\":\"marimo\""
+                + (t.durationMs > 0 ? ",\"duration_ms\":" + t.durationMs : "")
+                + "}}}]}";
         postJson(LB_API, payload);
     }
 
@@ -254,7 +293,7 @@ public class Scrobbler {
         c.setConnectTimeout(6000);
         c.setReadTimeout(12000);
         c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-        c.setRequestProperty("User-Agent", "marimo-android/1.2.2");
+        c.setRequestProperty("User-Agent", "marimo-android/1.2.3");
         try (OutputStream os = c.getOutputStream()) {
             os.write(formBody.getBytes(StandardCharsets.UTF_8));
         }
@@ -278,15 +317,17 @@ public class Scrobbler {
             c.setConnectTimeout(6000);
             c.setReadTimeout(12000);
             c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-            c.setRequestProperty("User-Agent", "marimo-android/1.2.2");
+            c.setRequestProperty("User-Agent", "marimo-android/1.2.3");
             try (OutputStream os = c.getOutputStream()) {
                 os.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }
             int code = c.getResponseCode();
             String resp = readBody(c, code);
+            lastLf = brief(code, resp);
             Log.i("marimo", "lf post -> " + code + " body=" + resp);
             c.disconnect();
         } catch (Exception e) {
+            lastLf = "request failed: " + e;
             Log.e("marimo", "lf post failed: " + e);
         }
     }
@@ -314,14 +355,17 @@ public class Scrobbler {
             c.setReadTimeout(12000);
             c.setRequestProperty("Content-Type", "application/json");
             c.setRequestProperty("Authorization", "Token " + lbToken);
-            c.setRequestProperty("User-Agent", "marimo-android/1.2.2");
+            c.setRequestProperty("User-Agent", "marimo-android/1.2.3");
             try (OutputStream os = c.getOutputStream()) {
                 os.write(json.getBytes(StandardCharsets.UTF_8));
             }
             int code = c.getResponseCode();
-            Log.i("marimo", "lb post -> " + code + " body=" + readBody(c, code));
+            String rb = readBody(c, code);
+            lastLb = brief(code, rb);
+            Log.i("marimo", "lb post -> " + code + " body=" + rb);
             c.disconnect();
         } catch (Exception e) {
+            lastLb = "request failed: " + e;
             Log.e("marimo", "lb post failed: " + e);
         }
     }

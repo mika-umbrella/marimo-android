@@ -650,6 +650,10 @@ public class MainActivity extends Activity {
         etLfKey.setText(cur[0]);
         etLfSession.setText(cur[2]);
         etLbToken.setText(cur[4]);
+        /* what's configured + what each service last replied — on a device with
+         * no adb this is the only way the user can see why a scrobble failed */
+        TextView st = findViewById(R.id.tv_scrobble_status);
+        if (st != null) st.setText(Scrobbler.status());
     }
 
     /** interactive last.fm login: token -> browser -> poll getSession.
@@ -710,6 +714,8 @@ public class MainActivity extends Activity {
         Scrobbler.configure(k, cur[1], s, cur[3], t);
         prefs.edit().putString("lf_key", k).putString("lf_session", s)
                 .putString("lb_token", t).apply();
+        TextView st = findViewById(R.id.tv_scrobble_status);
+        if (st != null) st.setText(Scrobbler.status());
         toast(Scrobbler.hasLf() || Scrobbler.hasLb()
                 ? "scrobble saved" : "no credentials — scrobbling off");
     }
@@ -1056,7 +1062,7 @@ public class MainActivity extends Activity {
                 (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
         c.setConnectTimeout(6000);
         c.setReadTimeout(10000);
-        c.setRequestProperty("User-Agent", "marimo-android/1.2.2");
+        c.setRequestProperty("User-Agent", "marimo-android/1.2.3");
         int code = c.getResponseCode();
         if (code != 200) { c.disconnect(); return null; }
         try (java.io.InputStream is = c.getInputStream()) {

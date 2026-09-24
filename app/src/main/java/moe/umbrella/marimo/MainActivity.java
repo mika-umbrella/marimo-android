@@ -28,6 +28,10 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.documentfile.provider.DocumentFile;
 
 import java.io.File;
@@ -154,6 +158,24 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         rootView = findViewById(R.id.root);
+        /* Android 15 (api 35) draws every app edge-to-edge whether it asks for
+         * it or not, and the window stops insetting itself — so the header
+         * (logo + settings button) ended up underneath the status bar and
+         * couldn't be tapped. Opt in explicitly and inset the root ourselves:
+         * padding moves the children clear of both bars while the art backdrop
+         * keeps drawing full-bleed behind them (padding doesn't shrink a
+         * View's background). Older releases already inset themselves, so
+         * leave them alone rather than padding twice. */
+        if (android.os.Build.VERSION.SDK_INT >= 35) {
+            WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+            final int barsMask = WindowInsetsCompat.Type.systemBars()
+                    | WindowInsetsCompat.Type.displayCutout();
+            ViewCompat.setOnApplyWindowInsetsListener(rootView, (v, insets) -> {
+                Insets bars = insets.getInsets(barsMask);
+                v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                return insets;
+            });
+        }
         tabBar = findViewById(R.id.tab_bar);
         status = findViewById(R.id.status);
         folderName = findViewById(R.id.folder_name);
@@ -1033,7 +1055,7 @@ public class MainActivity extends Activity {
                 (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
         c.setConnectTimeout(6000);
         c.setReadTimeout(10000);
-        c.setRequestProperty("User-Agent", "marimo-android/1.2");
+        c.setRequestProperty("User-Agent", "marimo-android/1.2.1");
         int code = c.getResponseCode();
         if (code != 200) { c.disconnect(); return null; }
         try (java.io.InputStream is = c.getInputStream()) {

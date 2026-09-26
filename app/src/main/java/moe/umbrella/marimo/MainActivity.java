@@ -1069,7 +1069,7 @@ public class MainActivity extends Activity {
                 (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
         c.setConnectTimeout(6000);
         c.setReadTimeout(10000);
-        c.setRequestProperty("User-Agent", "marimo-android/1.2.5");
+        c.setRequestProperty("User-Agent", "marimo-android/1.2.7");
         int code = c.getResponseCode();
         if (code != 200) { c.disconnect(); return null; }
         try (java.io.InputStream is = c.getInputStream()) {
@@ -1831,12 +1831,15 @@ public class MainActivity extends Activity {
     }
 
     /** find the track's context (album or queue) and decode its future tracks'
-     *  waveforms in the background — non-blocking, skips already-cached. */
+     *  waveforms in the background — non-blocking, skips already-cached.
+     *  Starts one PAST the current track: showNowPlaying already spawned its
+     *  own decode thread, and pre-warming it too just parks a worker on the
+     *  same per-token lock doing nothing. */
     private void prewarmWaveforms(Track t) {
         List<Track> ctx = tracksOf(t);
         if (ctx == null || ctx.isEmpty()) return;
         int idx = ctx.indexOf(t);
-        int start = idx < 0 ? 0 : idx;
+        int start = idx < 0 ? 0 : idx + 1;
         java.util.List<String> tokens = new ArrayList<>();
         for (int i = start; i < ctx.size(); i++)
             tokens.add(ctx.get(i).token);

@@ -204,6 +204,39 @@ Java_moe_umbrella_marimo_NativeBridge_embeddedArtPath(JNIEnv *env, jclass clazz,
     return arr;
 }
 
+/* size-only variants: the library scan needs to know WHETHER a track carries
+ * cover art, not what it looks like. the byte[] variants copied every cover
+ * into the java heap (a multi-MB allocation per track, thrown away) — this
+ * keeps that on the native side and gives java just an int. */
+
+JNIEXPORT jint JNICALL
+Java_moe_umbrella_marimo_NativeBridge_embeddedArtSizeFd(JNIEnv *env, jclass clazz,
+                                                        jint fd)
+{
+    unsigned char *data = NULL;
+    size_t len = 0;
+    if (tag_embedded_art_fd(fd, &data, &len, NULL, 0) != 0) return -1;
+    free(data);
+    return len > 0x7FFFFFFFu ? 0x7FFFFFFF : (jint)len;
+}
+
+JNIEXPORT jint JNICALL
+Java_moe_umbrella_marimo_NativeBridge_embeddedArtSizePath(JNIEnv *env, jclass clazz,
+                                                          jstring path)
+{
+    const char *p = path ? (*env)->GetStringUTFChars(env, path, NULL) : NULL;
+    unsigned char *data = NULL;
+    size_t len = 0;
+    jint rc;
+    if (!p) return -1;
+    rc = tag_embedded_art(p, &data, &len, NULL, 0) == 0
+         ? (jint)(len > 0x7FFFFFFFu ? 0x7FFFFFFF : len)
+         : -1;
+    free(data);
+    (*env)->ReleaseStringUTFChars(env, path, p);
+    return rc;
+}
+
 /* ---------------- queue (opaque handle) ---------------- */
 
 JNIEXPORT jlong JNICALL

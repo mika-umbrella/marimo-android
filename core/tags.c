@@ -16,6 +16,17 @@ static int get_u32be(const unsigned char *p) { return (p[0] << 24) | (p[1] << 16
 static int get_u32le(const unsigned char *p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24); }
 static int get_u24be(const unsigned char *p) { return (p[0] << 16) | (p[1] << 8) | p[2]; }
 
+/* ID3v2.4 stores frame (and header) sizes "synchsafe": 7 significant bits per
+ * byte, top bit always clear. ID3v2.3 uses plain big-endian. Reading a 2.4
+ * size with the 2.3 formula inflates it several-fold — a 128KB picture came
+ * back as 486KB, which sent id3_art's memcpy off the end of the tag buffer
+ * (a real native SIGSEGV on device). */
+static int syncsafe32(const unsigned char *p)
+{
+    return ((p[0] & 0x7F) << 21) | ((p[1] & 0x7F) << 14) |
+           ((p[2] & 0x7F) << 7) | (p[3] & 0x7F);
+}
+
 /* parse leading digits of "12" / "12/16" / "A1" -> 12 / 12 / -1 */
 static int parse_num(const char *s, int len)
 {
@@ -148,14 +159,20 @@ static int flac_art(FILE *f, unsigned char **out, size_t *outlen,
     return -1;
 }
 
-/* ID3v2.3/2.4 APIC frame: encoding(1), mime nul, pictype(1), desc nul, data */
+/* ID3v2.2/2.3/2.4 APIC/PIC frame: encoding(1), mime nul, pictype(1), desc nul, data.
+ * `fsize` is the frame body length as declared by the frame header and MUST
+ * already be clamped by the caller to the bytes really present at `buf`
+ * (see tag_embedded_art_fd). every scan here is bounded by it, so a bogus or
+ * mis-sized frame degrades to "no art" instead of reading off the end. */
 static int id3_art(const unsigned char *buf, int fsize,
                    unsigned char **out, size_t *outlen, char *mime, size_t mimesz)
 {
     int off = 1;                 /* text encoding */
     int mlen = 0, dlen = 0;
-    while (off + 1 < fsize && buf[off + mlen]) mlen++;
-    if (off + mlen + 1 >= fsize) return -1;
+    if (fsize < 2) return -1;
+    /* mime string — scan for its NUL, never past the frame */
+    while (off + mlen < fsize && buf[off + mlen]) mlen++;
+    if (off + mlen >= fsize) return -1;      /* unterminated */
     if (mime && mimesz > 0) {
         int cp = mlen < (int)mimesz - 1 ? mlen : (int)mimesz - 1;
         memcpy(mime, buf + off, cp);
@@ -170,12 +187,13 @@ static int id3_art(const unsigned char *buf, int fsize,
         while (off < fsize && buf[off]) off++;
         off += 1;
     }
+    if (off >= fsize) return -1;              /* no description terminator */
     dlen = fsize - off;
-    if (dlen <= 0 || off >= fsize) return -1;
-    *out = (unsigned char *)malloc(dlen);
+    if (dlen <= 0) return -1;
+    *out = (unsigned char *)malloc((size_t)dlen);
     if (!*out) return -1;
-    memcpy(*out, buf + off, dlen);
-    *outlen = dlen;
+    memcpy(*out, buf + off, (size_t)dlen);
+    *outlen = (size_t)dlen;
     return 0;
 }
 
@@ -198,38 +216,39 @@ int tag_embedded_art_fd(int fd, unsigned char **out, size_t *outlen,
         /* re-read whole tag: id3_parse already reads it; simplest is to
          * walk frames here on the same buffer */
         int ver = hdr[3];
-        int size = ((hdr[6] & 0x7F) << 21) | ((hdr[7] & 0x7F) << 14) |
-                   ((hdr[8] & 0x7F) << 7) | (hdr[9] & 0x7F);
+        int size = syncsafe32(hdr + 6);
         unsigned char *buf;
         int off = 0;             /* buf = tag body (header read above) */
         if (size > 0 && size < 64 * 1024 * 1024) {
-            buf = (unsigned char *)malloc(size);
+            buf = (unsigned char *)malloc((size_t)size);
             if (buf && fread(buf, 1, size, f) == (size_t)size) {
                 if ((hdr[5] & 0x40) && off + 4 <= size) {
                     int eh = get_u32be(buf + off);
                     off += 4 + eh;
                 }
                 while (off + (ver == 2 ? 6 : 10) <= size) {
-                    int idlen = ver == 2 ? 3 : 4;
+                    int hlen = ver == 2 ? 6 : 10;
+                    int avail = size - off - hlen;   /* body bytes really here */
                     int fsize;
                     const char *id = (const char *)buf + off;
                     if (id[0] == 0) break;
                     if (ver == 2) fsize = get_u24be(buf + off + 3);
-                    else {
-                        fsize = get_u32be(buf + off + 4);
-                        if (ver == 4) fsize &= 0x0FFFFFFF;
-                    }
+                    else if (ver == 4) fsize = syncsafe32(buf + off + 4);
+                    else fsize = get_u32be(buf + off + 4);
                     if (fsize < 0) fsize = 0;
+                    /* never let a frame claim more than the buffer holds —
+                     * this is what id3_art's memcpy trusted blindly */
+                    if (fsize > avail) fsize = avail;
                     if (ver == 2) {
                         if (!memcmp(id, "PIC", 3)) { /* v2.2 unsupported */
                             rc = -1;
                             break;
                         }
                     } else if (!memcmp(id, "APIC", 4)) {
-                        rc = id3_art(buf + off + 10, fsize, out, outlen, mime, mimesz);
+                        rc = id3_art(buf + off + hlen, fsize, out, outlen, mime, mimesz);
                         break;
                     }
-                    off += idlen + (ver == 2 ? 3 : 6) + fsize;
+                    off += hlen + fsize;
                 }
             }
             free(buf);
@@ -275,8 +294,9 @@ static int flac_parse(FILE *f, Meta *meta, int *track, int *disc)
                 meta->duration_ms = (int)(total * 1000 / rate);
         } else if (type == 4) {
             /* VORBIS_COMMENT */
-            unsigned char *buf = (unsigned char *)malloc(len);
+            unsigned char *buf = (unsigned char *)malloc((size_t)len);
             int off = 0;
+            if (!buf) return -1;      /* unchecked before: fread(NULL) segfaults */
             if (fread(buf, 1, len, f) != (size_t)len) { free(buf); return -1; }
             if (len < 4) { free(buf); return -1; }
             off = 4 + get_u32le(buf);
@@ -338,9 +358,10 @@ static int id3_parse(FILE *f, Meta *meta, int *track, int *disc)
     int ver, size, off = 0;
     if (fread(h, 1, 10, f) != 10 || memcmp(h, "ID3", 3)) return -1;
     ver = h[3];
-    size = ((h[6] & 0x7F) << 21) | ((h[7] & 0x7F) << 14) | ((h[8] & 0x7F) << 7) | (h[9] & 0x7F);
-    if (size <= 0) return -1;
-    buf = (unsigned char *)malloc(size);
+    size = syncsafe32(h + 6);
+    if (size <= 0 || size > 64 * 1024 * 1024) return -1;
+    buf = (unsigned char *)malloc((size_t)size);
+    if (!buf) return -1;              /* was unchecked: fread(NULL) segfaults */
     if (fread(buf, 1, size, f) != (size_t)size) { free(buf); return -1; }
     if ((h[5] & 0x40) && off + 4 <= size) {          /* extended header */
         int eh = get_u32be(buf + off);
@@ -348,18 +369,22 @@ static int id3_parse(FILE *f, Meta *meta, int *track, int *disc)
     }
     while (off + 6 <= size) {
         int idlen = ver == 2 ? 3 : 4;
+        int hlen = ver == 2 ? 6 : 10;
+        int avail = size - off - hlen;
         int fsize;
         const char *id;
-        if (off + idlen + 3 > size) break;
+        if (off + idlen + 3 > size || avail < 0) break;
         id = (const char *)buf + off;
         if (id[0] == 0) break;
         if (ver == 2) {
             fsize = get_u24be(buf + off + 3);
+        } else if (ver == 4) {
+            fsize = syncsafe32(buf + off + 4);   /* v2.4 sizes are synchsafe */
         } else {
             fsize = get_u32be(buf + off + 4);
-            if (ver == 4) fsize &= 0x0FFFFFFF;
         }
         if (fsize < 0) fsize = 0;
+        if (fsize > avail) fsize = avail;        /* stay inside the tag buffer */
         if (ver == 2) {
             if (meta && !memcmp(id, "TT2", 3) && !meta->title[0]) id3_text(buf + off + 6, fsize, meta->title, sizeof meta->title);
             else if (meta && !memcmp(id, "TP1", 3) && !meta->artist[0]) id3_text(buf + off + 6, fsize, meta->artist, sizeof meta->artist);
@@ -566,6 +591,7 @@ static int ogg_parse(FILE *f, Meta *meta, int *track, int *disc)
     blen = end < 131072 ? end : 131072;            /* OpusTags is early + small */
     if (blen <= 0) return -1;
     buf = (unsigned char *)malloc((size_t)blen);
+    if (!buf) return -1;          /* unchecked before: fread(NULL) segfaults */
     if (fread(buf, 1, (size_t)blen, f) != (size_t)blen) { free(buf); return -1; }
     for (long i = 0; i + 8 <= blen; i++) {
         /* Opus: "OpusTags" comment packet (8-byte magic, then comments). */
@@ -589,16 +615,22 @@ static int ogg_parse(FILE *f, Meta *meta, int *track, int *disc)
         }
     }
     free(buf);
-    /* duration: granule of the last Ogg page / sample rate. */
+    /* duration: granule of the last Ogg page / sample rate. read the tail in
+     * ONE go and scan it in memory — the old loop did a seek+read pair per
+     * BYTE (≈66,000 of them, ~130k syscalls per file, each a SAF round-trip
+     * on android) which is what made scanning an Opus library crawl. */
     if (meta) {
-        unsigned char h[27];
         unsigned long long gran = 0;
         long p0 = end - 66000 < 0 ? 0 : end - 66000;
-        for (long p = p0; p + 27 <= end; p++) {
-            fseek(f, p, SEEK_SET);
-            if (fread(h, 1, 27, f) != 27) break;
-            if (memcmp(h, "OggS", 4)) continue;
-            gran = get_u64le(h + 6);
+        long tn = end - p0;
+        unsigned char *tail = (unsigned char *)malloc((size_t)tn);
+        if (tail) {
+            size_t got = (fseek(f, p0, SEEK_SET) == 0)
+                       ? fread(tail, 1, (size_t)tn, f) : 0;
+            for (long p = 0; p + 27 <= (long)got; p++)
+                if (!memcmp(tail + p, "OggS", 4))
+                    gran = get_u64le(tail + p + 6);
+            free(tail);
         }
         if (gran > 0 && rate > 0)
             meta->duration_ms = (int)(gran * 1000 / rate);

@@ -24,6 +24,13 @@ public class NativeBridge {
     /** Embedded cover art from a path (app-private storage). */
     public static native byte[] embeddedArtPath(String path);
 
+    /** Size of the embedded cover art in bytes, or -1 if there is none — same
+     *  as embeddedArtFd/Path but without copying the image into the java heap.
+     *  The scan only needs presence, and a multi-MB byte[] per track is how
+     *  you OOM a library scan. Consumes the fd! */
+    public static native int embeddedArtSizeFd(int fd);
+    public static native int embeddedArtSizePath(String path);
+
     /** Opaque C queue handle. */
     public static native long queueNew(int shuffle, int repeat);
     public static native int queueAdd(long q, String token, String name, long size);

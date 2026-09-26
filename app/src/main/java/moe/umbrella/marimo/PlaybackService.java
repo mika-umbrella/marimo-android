@@ -320,22 +320,9 @@ public class PlaybackService extends MediaSessionService {
         queueArt.clear();
         queueArtBytes = 0;
         for (Track t : list) {
-            androidx.media3.common.MediaMetadata.Builder md =
-                    new androidx.media3.common.MediaMetadata.Builder()
-                            .setTitle(t.title.isEmpty() ? t.name : t.title)
-                            .setArtist(t.artist)
-                            .setAlbumTitle(t.album);
             /* the platform's media controls (lockscreen / home widget) take the
              * art from the item metadata — without this they show nothing */
-            byte[] art = artBytesFor(t);
-            if (art != null) md.setArtworkData(art,
-                    androidx.media3.common.MediaMetadata.PICTURE_TYPE_FRONT_COVER);
-            items.add(new MediaItem.Builder()
-                    .setUri(playUri(t.token))
-                    .setMediaId(t.token)
-                    .setTag(t)
-                    .setMediaMetadata(md.build())
-                    .build());
+            items.add(mediaItemFor(t));
         }
         player.setMediaItems(items,
                 Math.min(idx, Math.max(0, items.size() - 1)), 0);
@@ -359,12 +346,20 @@ public class PlaybackService extends MediaSessionService {
         }
     }
 
-    public static int addToQueueStatic(List<Track> add) {
+    /** append to the queue. the STATIC list is what the UI draws, but the
+     *  player's own playlist is what actually advances — appending to only
+     *  one of them is how "add to queue" ended each album in silence: the
+     *  list grew, the toast said "queued", and the exhausted player had
+     *  nothing after the current album. Both now, plus the persisted queue. */
+    public static void addToQueueStatic(List<Track> add) {
+        if (add == null || add.isEmpty()) return;
         synchronized (tracks) {
-            int first = tracks.size();
             tracks.addAll(add);
-            return first;
         }
+        saveQueue(null);
+        PlaybackService s = instance;
+        if (s == null || s.player == null) return;   /* queued; built on first play */
+        s.appendToPlayer(add);
     }
 
     public static boolean isPlaying() { return playing; }
@@ -570,6 +565,50 @@ public class PlaybackService extends MediaSessionService {
                 android.app.PendingIntent.FLAG_IMMUTABLE);
     }
 
+    /** one Track → one MediaItem. the platform's media controls (lockscreen /
+     *  home widget) take the cover from the item metadata, so the art bytes
+     *  ride along here. shared by every path that builds a playlist. */
+    private MediaItem mediaItemFor(Track t) {
+        androidx.media3.common.MediaMetadata.Builder md =
+                new androidx.media3.common.MediaMetadata.Builder()
+                        .setTitle(t.title.isEmpty() ? t.name : t.title)
+                        .setArtist(t.artist)
+                        .setAlbumTitle(t.album);
+        byte[] art = artBytesFor(t);
+        if (art != null) md.setArtworkData(art,
+                androidx.media3.common.MediaMetadata.PICTURE_TYPE_FRONT_COVER);
+        return new MediaItem.Builder()
+                .setUri(playUri(t.token))
+                .setMediaId(t.token)
+                .setTag(t)
+                .setMediaMetadata(md.build())
+                .build();
+    }
+
+    /** append tracks to the LIVE player playlist (static list already updated).
+     *  If the player has no playlist at all yet we build the whole thing and
+     *  prepare — but stay paused, because queueing is not a play command.
+     *  If it just ran to the end, hop onto the new track and resume: you added
+     *  music to a queue, so a queue that silently stays silent is the bug. */
+    private void appendToPlayer(List<Track> add) {
+        if (player.getMediaItemCount() == 0) {
+            queueTracksAt(0);
+            player.prepare();
+            return;
+        }
+        /* note the ENDED state BEFORE appending — appending can un-end it */
+        boolean wasEnded = player.getPlaybackState() == Player.STATE_ENDED;
+        List<MediaItem> items = new ArrayList<>();
+        for (Track t : add) items.add(mediaItemFor(t));
+        player.addMediaItems(items);
+        if (wasEnded) {
+            player.seekToNextMediaItem();
+            player.prepare();
+            player.play();
+        }
+        postWidget();
+    }
+
     private void queueTracks() {
         queueTracksAt(0);
     }
@@ -580,23 +619,7 @@ public class PlaybackService extends MediaSessionService {
         List<MediaItem> items = new ArrayList<>();
         queueArt.clear();
         queueArtBytes = 0;
-        for (Track t : list) {
-            androidx.media3.common.MediaMetadata.Builder md =
-                    new androidx.media3.common.MediaMetadata.Builder()
-                            .setTitle(t.title.isEmpty() ? t.name : t.title)
-                            .setArtist(t.artist)
-                            .setAlbumTitle(t.album);
-            byte[] art = artBytesFor(t);
-            if (art != null) md.setArtworkData(art,
-                    androidx.media3.common.MediaMetadata.PICTURE_TYPE_FRONT_COVER);
-            MediaItem mi = new MediaItem.Builder()
-                    .setUri(playUri(t.token))
-                    .setMediaId(t.token)
-                    .setTag(t)
-                    .setMediaMetadata(md.build())
-                    .build();
-            items.add(mi);
-        }
+        for (Track t : list) items.add(mediaItemFor(t));
         if (index < 0) index = 0;
         if (index >= items.size()) index = Math.max(0, items.size() - 1);
         player.setMediaItems(items, index, 0);

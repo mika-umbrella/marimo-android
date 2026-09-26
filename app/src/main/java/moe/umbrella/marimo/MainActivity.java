@@ -80,6 +80,13 @@ public class MainActivity extends Activity {
     /* in-memory token -> Track map of the last cache load, so an incremental
      * rescan doesn't re-parse library.dat from disk every time (the crawl) */
     private final HashMap<String, Track> knownTracks = new HashMap<>();
+    /* album folder -> "does it hold a cover image?" Memoised per folder and
+     * pre-filled by the tree walk. readTags() used to read the WHOLE cover
+     * file once per TRACK just to answer this (thousands of multi-MB reads
+     * and as much short-lived garbage); a name check per folder is all it
+     * needs — the bytes are read lazily, per album, when a cover is decoded. */
+    private final java.util.concurrent.ConcurrentHashMap<String, Boolean>
+            folderCoverCache = new java.util.concurrent.ConcurrentHashMap<>();
     private AlbumAdapter adapter;
     private TextView status, folderName;
     private LinearLayout screenLibrary, screenPlayer, screenQueue, screenSettings, screenScrobble;
@@ -1062,7 +1069,7 @@ public class MainActivity extends Activity {
                 (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
         c.setConnectTimeout(6000);
         c.setReadTimeout(10000);
-        c.setRequestProperty("User-Agent", "marimo-android/1.2.3");
+        c.setRequestProperty("User-Agent", "marimo-android/1.2.5");
         int code = c.getResponseCode();
         if (code != 200) { c.disconnect(); return null; }
         try (java.io.InputStream is = c.getInputStream()) {
@@ -1193,6 +1200,7 @@ public class MainActivity extends Activity {
             synchronized (knownTracks) { known = new HashMap<>(knownTracks); }
 
             albums.clear();
+            folderCoverCache.clear();
             openAlbum = null;
             List<Album> found = new ArrayList<>();
             HashMap<Track, DocumentFile> dirs = new HashMap<>();
@@ -1410,12 +1418,17 @@ public class MainActivity extends Activity {
         if (f.isDirectory()) {
             Album a = new Album(f.getName());
             a.albumDoc = f;
-            for (DocumentFile t : f.listFiles())
-                if (t.isFile() && isAudio(t.getName())) {
-                    Track tr = new Track(t.getUri().toString(), t.getName());
+            boolean folderCover = false;
+            for (DocumentFile t : f.listFiles()) {
+                String n = t.getName();
+                if (n != null && isFolderCoverName(n)) folderCover = true;
+                if (t.isFile() && isAudio(n)) {
+                    Track tr = new Track(t.getUri().toString(), n);
                     pdirs.put(tr, f);
                     a.tracks.add(tr);
                 }
+            }
+            folderCoverCache.put(f.getUri().toString(), folderCover);
             if (!a.tracks.isEmpty()) per.add(a);
         } else if (f.isFile() && isAudio(f.getName())) {
             Album loose = new Album("(loose files)");
@@ -1459,15 +1472,17 @@ public class MainActivity extends Activity {
             }
             /* presence flag only — decode the cover lazily (holding a full
              * Bitmap per track OOMs at ~950 files). raw bytes are discarded. */
-            t.hasArt = hasEmbeddedArt(t.token) || treeFolderCover(albumDir) != null;
+            t.hasArt = hasEmbeddedArt(t.token) || hasFolderCover(albumDir);
             t.art = null;   /* decoded on demand by loadArt */
         } catch (Exception e) {
             android.util.Log.e("marimo", "readTags failed: " + t.token, e);
         }
     }
 
-    /** does this track carry an embedded picture? raw-bytes check, no decode.
-     *  reads (and discards) the art bytes to learn presence. */
+    /** does this track carry an embedded picture? asks the C core for the art
+     *  SIZE rather than the bytes — the scan only needs presence, and copying
+     *  a multi-MB cover into the java heap per track bought nothing (and was
+     *  another way to lose the process to an OOM). */
     private boolean hasEmbeddedArt(String token) {
         try {
             if (token.startsWith("content://")) {
@@ -1475,21 +1490,37 @@ public class MainActivity extends Activity {
                 try {
                     pfd = getContentResolver()
                             .openFileDescriptor(Uri.parse(token), "r");
-                    if (pfd != null) {
-                        byte[] b = NativeBridge.embeddedArtFd(pfd.detachFd());
-                        return b != null && b.length > 0;
-                    }
+                    if (pfd != null)
+                        return NativeBridge.embeddedArtSizeFd(pfd.detachFd()) > 0;
                 } catch (Exception e) { /* none */ }
                 finally {
                     if (pfd != null)
                         try { pfd.close(); } catch (Exception ignore) { }
                 }
             } else {
-                byte[] b = NativeBridge.embeddedArtPath(token);
-                return b != null && b.length > 0;
+                return NativeBridge.embeddedArtSizePath(token) > 0;
             }
         } catch (Exception e) { }
         return false;
+    }
+
+    /** is there a cover image file in this album folder? name check only —
+     *  the image is never read here. memoised per folder; the tree walk
+     *  pre-fills the map, so this is usually just a lookup. */
+    private boolean hasFolderCover(DocumentFile dir) {
+        if (dir == null) return false;
+        String key = dir.getUri().toString();
+        Boolean cached = folderCoverCache.get(key);
+        if (cached != null) return cached;
+        boolean found = false;
+        try {
+            for (DocumentFile c : dir.listFiles()) {
+                String n = c.getName();
+                if (n != null && isFolderCoverName(n)) { found = true; break; }
+            }
+        } catch (Exception e) { }
+        folderCoverCache.put(key, found);
+        return found;
     }
 
     /** read cover/folder/front art from the audio file's folder, matching

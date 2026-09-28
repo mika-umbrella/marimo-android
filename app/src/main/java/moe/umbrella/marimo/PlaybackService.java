@@ -377,6 +377,23 @@ public class PlaybackService extends MediaSessionService {
         s.appendToPlayer(add);
     }
 
+    /** empty the queue everywhere at once: the static list the UI draws, the
+     *  live player playlist, queue.dat, and the playback notification. Dropping
+     *  the notification matters — a widget still describing a queue that no
+     *  longer exists is the same lie as one stuck on an old track. Playback
+     *  stops with it (clearing the playlist fires a media-item transition, so
+     *  the finished track is still scrobbled and written to the diary). */
+    public static void clearQueue() {
+        synchronized (tracks) { tracks.clear(); }
+        savedCur = -1;
+        saveQueue(-1);
+        PlaybackService s = instance;
+        if (s == null || s.player == null) return;
+        s.player.stop();
+        s.player.clearMediaItems();
+        s.dropWidget();
+    }
+
     public static boolean isPlaying() { return playing; }
     public static long position() { return positionMs; }
     public static long duration() { return durationMs; }
@@ -580,6 +597,20 @@ public class PlaybackService extends MediaSessionService {
         android.app.NotificationManager nm =
                 getSystemService(android.app.NotificationManager.class);
         if (nm != null) nm.notify(1, b.build());
+    }
+
+    /** take the playback notification down — nothing left for it to describe.
+     *  postWidget() bails when there is no current item, so clearing the queue
+     *  needs this or the widget outlives the music. */
+    private void dropWidget() {
+        try {
+            stopForeground(android.app.Service.STOP_FOREGROUND_REMOVE);
+        } catch (Exception e) {
+            android.util.Log.e("marimo", "stopForeground: " + e);
+        }
+        android.app.NotificationManager nm =
+                getSystemService(android.app.NotificationManager.class);
+        if (nm != null) nm.cancel(1);
     }
 
     private android.app.PendingIntent ctl(String action) {

@@ -336,6 +336,7 @@ public class MainActivity extends Activity {
             showTab(2);
             refreshQueueList();
         });
+        findViewById(R.id.btn_clear_queue).setOnClickListener(v -> confirmClearQueue());
         findViewById(R.id.tab_player).setOnClickListener(v -> showTab(1));
 
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
@@ -446,6 +447,8 @@ public class MainActivity extends Activity {
         Ui.tint(findViewById(R.id.btn_settings), 0);
         Ui.tint(findViewById(R.id.btn_settings_back), 0);
         Ui.panelPress(findViewById(R.id.btn_settings_q));
+        Ui.press(findViewById(R.id.btn_clear_queue));
+        Ui.text(findViewById(R.id.btn_clear_queue), 1);
         Ui.panelPress(findViewById(R.id.btn_scrobble_back));
         Ui.panelPress(findViewById(R.id.btn_scrobble_save));
         Ui.panelPress(findViewById(R.id.btn_lf_login));
@@ -1081,7 +1084,7 @@ public class MainActivity extends Activity {
                 (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
         c.setConnectTimeout(6000);
         c.setReadTimeout(10000);
-        c.setRequestProperty("User-Agent", "marimo-android/1.2.11");
+        c.setRequestProperty("User-Agent", "marimo-android/1.2.12");
         int code = c.getResponseCode();
         if (code != 200) { c.disconnect(); return null; }
         try (java.io.InputStream is = c.getInputStream()) {
@@ -1281,9 +1284,16 @@ public class MainActivity extends Activity {
                             ft.durationMs = prior.durationMs;
                             ft.track = prior.track;
                             ft.disc = prior.disc;
+                            /* hasArt is cached, but "is there a cover image in
+                             * this folder" is a cheap memoised name check — do
+                             * it fresh every scan, or a folder cover added
+                             * later (or matched by a newer rule) never shows
+                             * up without wiping the library cache. */
+                            DocumentFile cd = dirs.get(ft);
                             ft.hasArt = prior.hasArt
                                     || LibraryCache.hasArtOnDisk(
-                                            MainActivity.this, ft.token);
+                                            MainActivity.this, ft.token)
+                                    || (cd != null && hasFolderCover(cd));
                         } else {
                             readTags(ft, dirs.get(ft));
                         }
@@ -1441,7 +1451,7 @@ public class MainActivity extends Activity {
             DocumentFile waves = null;
             for (DocumentFile t : f.listFiles()) {
                 String n = t.getName();
-                if (n != null && isFolderCoverName(n)) folderCover = true;
+                if (n != null && CoverName.rank(n, f.getName()) >= 0) folderCover = true;
                 if (WAVES_NAME.equals(n)) waves = t;
                 if (t.isFile() && isAudio(n)) {
                     Track tr = new Track(t.getUri().toString(), n);
@@ -1578,9 +1588,10 @@ public class MainActivity extends Activity {
         if (cached != null) return cached;
         boolean found = false;
         try {
+            String folder = dir.getName();
             for (DocumentFile c : dir.listFiles()) {
                 String n = c.getName();
-                if (n != null && isFolderCoverName(n)) { found = true; break; }
+                if (n != null && CoverName.rank(n, folder) >= 0) { found = true; break; }
             }
         } catch (Exception e) { }
         folderCoverCache.put(key, found);
@@ -1594,29 +1605,20 @@ public class MainActivity extends Activity {
     private byte[] treeFolderCover(DocumentFile dir) {
         try {
             if (dir == null) return null;
+            String folder = dir.getName();
+            DocumentFile best = null;
+            int bestRank = Integer.MAX_VALUE;
             for (DocumentFile c : dir.listFiles()) {
                 String n = c.getName();
-                if (n != null && isFolderCoverName(n)) {
-                    java.io.InputStream in = getContentResolver()
-                            .openInputStream(c.getUri());
-                    return readAll(in);
-                }
+                if (n == null) continue;
+                int r = CoverName.rank(n, folder);
+                if (r >= 0 && r < bestRank) { bestRank = r; best = c; }
             }
+            if (best == null) return null;
+            java.io.InputStream in = getContentResolver().openInputStream(best.getUri());
+            return readAll(in);
         } catch (Exception e) { }
         return null;
-    }
-
-    /** is this filename a folder-cover candidate, case-insensitively?
-     *  stem in {cover, folder, front} and an image extension. */
-    private static boolean isFolderCoverName(String name) {
-        int dot = name.lastIndexOf('.');
-        if (dot <= 0) return false;
-        String stem = name.substring(0, dot).toLowerCase();
-        String ext = name.substring(dot + 1).toLowerCase();
-        boolean goodExt = ext.equals("jpg") || ext.equals("jpeg")
-                || ext.equals("png") || ext.equals("bmp") || ext.equals("webp");
-        return goodExt && (stem.equals("cover") || stem.equals("folder")
-                || stem.equals("front"));
     }
 
     /** read cover.jpg/... from an app-private folder (needs no permission). */
@@ -1627,11 +1629,12 @@ public class MainActivity extends Activity {
             java.io.File[] files = dir.listFiles();
             if (files == null) return null;
             String match = null;
-            for (File c : files)
-                if (c.isFile() && isFolderCoverName(c.getName())) {
-                    match = c.getAbsolutePath();
-                    break;
-                }
+            int bestRank = Integer.MAX_VALUE;
+            for (java.io.File c : files) {
+                if (!c.isFile()) continue;
+                int r = CoverName.rank(c.getName(), dir.getName());
+                if (r >= 0 && r < bestRank) { bestRank = r; match = c.getAbsolutePath(); }
+            }
             if (match == null) return null;
             java.io.FileInputStream in = new java.io.FileInputStream(match);
             java.io.File c = new java.io.File(match);
@@ -1915,6 +1918,23 @@ public class MainActivity extends Activity {
         List<Track> q = PlaybackService.peekQueue();
         QueueAdapter.dragIndex = dragFrom;
         qList.setAdapter(new QueueAdapter(this, q));
+    }
+
+    /** clearing throws away an arbitrarily long queue with no undo, so ask
+     *  once — and say how much is going. */
+    private void confirmClearQueue() {
+        int n = PlaybackService.peekQueue().size();
+        if (n == 0) { toast("queue is already empty"); return; }
+        new AlertDialog.Builder(this)
+                .setTitle("clear the queue?")
+                .setMessage(n + (n == 1 ? " track" : " tracks"))
+                .setPositiveButton("clear", (d, w) -> {
+                    PlaybackService.clearQueue();
+                    refreshQueueList();
+                    toast("queue cleared");
+                })
+                .setNegativeButton("cancel", null)
+                .show();
     }
 
     private long hash(String s) {

@@ -409,6 +409,21 @@
                     android:textStyle="bold"
                     android:textColor="#7dff7d" />
 
+                <Button
+                    android:id="@+id/btn_clear_queue"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="0dp"
+                    android:paddingLeft="14dp"
+                    android:paddingRight="14dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:text="clear"
+                    android:textAllCaps="false"
+                    android:textSize="15sp"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:contentDescription="clear the queue" />
+
                 <ImageButton
                     android:id="@+id/btn_settings_q"
                     android:layout_width="48dp"

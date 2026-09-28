@@ -270,6 +270,11 @@ public class PlaybackService extends MediaSessionService {
                         Scrobbler.nowPlaying(cur);
                     }
                 }
+                /* the notification carries its own play/pause action icon (the
+                 * collapsed one and the lockscreen both draw it from here), so
+                 * pausing has to re-post or the widget keeps offering "pause"
+                 * while nothing is playing */
+                postWidget();
             }
             @Override public void onMediaItemTransition(
                     androidx.media3.common.MediaItem mi, int reason) {
@@ -286,6 +291,16 @@ public class PlaybackService extends MediaSessionService {
                     activeTrack = nt;
                     Scrobbler.nowPlaying(nt);
                 }
+                /* the pulldown/lockscreen widget renders its title, artist and
+                 * cover from the NOTIFICATION we post, not from the session —
+                 * progress and the play/pause glyph come from the session, so a
+                 * widget that is never re-posted looks alive while stuck on the
+                 * track it was posted for. This is the only hook that fires on
+                 * auto-advance and on next/prev (gapless runs through the whole
+                 * queue without any other postWidget call), so the widget would
+                 * stay on the first track of the album you pressed play on —
+                 * queued albums never appearing at all. */
+                postWidget();
             }
             @Override public void onPlaybackStateChanged(int state) {
                 if (state == Player.STATE_ENDED
@@ -522,9 +537,11 @@ public class PlaybackService extends MediaSessionService {
     /** MediaStyle notification wired to our MediaSession token: the
      *  pulldown widget with prev/play/next that controls the player. */
     private void postWidget() {
-        Track t = player.getCurrentMediaItem() != null
-                ? (Track) player.getCurrentMediaItem().localConfiguration.tag
-                : null;
+        /* also called from player callbacks now (track transitions, play/pause),
+         * and makePlayer() installs its listener before the session exists —
+         * bail instead of NPEing on a half-built service. */
+        if (player == null || session == null) return;
+        Track t = currentTrack();
         if (t == null) return;
         Intent open = new Intent(this, MainActivity.class);
         android.app.PendingIntent pi = android.app.PendingIntent.getActivity(
@@ -553,10 +570,16 @@ public class PlaybackService extends MediaSessionService {
                         .addAction(new androidx.core.app.NotificationCompat.Action(
                                 android.R.drawable.ic_media_next, "next",
                                 ctl(PlaybackService.ACTION_NEXT)));
-        startForeground(1, b.build());
+        try {
+            startForeground(1, b.build());
+        } catch (Exception e) {
+            /* FGS promotion can be refused (background-start restrictions); the
+             * notify below still refreshes the widget, which matters more */
+            android.util.Log.e("marimo", "startForeground: " + e);
+        }
         android.app.NotificationManager nm =
                 getSystemService(android.app.NotificationManager.class);
-        nm.notify(1, b.build());
+        if (nm != null) nm.notify(1, b.build());
     }
 
     private android.app.PendingIntent ctl(String action) {
@@ -594,6 +617,7 @@ public class PlaybackService extends MediaSessionService {
         if (player.getMediaItemCount() == 0) {
             queueTracksAt(0);
             player.prepare();
+            postWidget();   /* restored-but-idle queue: the widget should show it */
             return;
         }
         /* note the ENDED state BEFORE appending — appending can un-end it */

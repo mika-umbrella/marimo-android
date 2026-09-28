@@ -96,6 +96,16 @@ public class WaveformExtractor {
         }
     }
 
+    /** Seed a track's waveform from its album's precomputed sidecar (read by the
+     *  library scan). Also written to disk: a memory-only seed would mean the
+     *  first play after every app launch decodes again, which is the exact cost
+     *  this exists to avoid. Re-scanning refreshes it. */
+    public static void putPrecomputed(Context ctx, String token, int[] peaks) {
+        if (token == null || peaks == null || peaks.length != BUCKETS) return;
+        cache.put(token, peaks);
+        writeDisk(ctx, token, peaks);
+    }
+
     /** persist a waveform once so repeat listens (even across launches) are
      *  instant — the full MediaCodec decode only ever happens one time.
      *  compact: 64-bit token hash (8B) + 96 peak bytes ≈ ~104B per track. */
@@ -137,7 +147,12 @@ public class WaveformExtractor {
         try {
             java.io.File d = new java.io.File(ctx.getFilesDir(), CACHE_DIR);
             d.mkdirs();   /* the first write needs the dir before the .tmp path */
-            java.io.File tmp = new java.io.File(d, ".tmp");
+            /* per-token tmp name, NOT one shared ".tmp": prewarm decodes on
+             * several threads at once (and the library scan seeds on several
+             * more), and a shared temp path has them overwriting each other's
+             * half-written bytes before the rename. */
+            java.io.File tmp = new java.io.File(d,
+                    Long.toHexString(tokenHash(token)) + ".tmp");
             try (java.io.DataOutputStream out = new java.io.DataOutputStream(
                     new java.io.FileOutputStream(tmp))) {
                 out.writeLong(tokenHash(token));

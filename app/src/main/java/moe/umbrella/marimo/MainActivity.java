@@ -102,6 +102,10 @@ public class MainActivity extends Activity {
     private int tab = 0;
     private String shownToken = "";   /* 0 library, 1 player, 2 queue */
     private Uri treeUri;
+    /* the saved tree's system-side grant was gone at startup (revoked, or the
+     * volume/provider was remounted). Without this the app just showed an empty
+     * library, which reads exactly like having no music at all. */
+    private boolean treeGrantLost;
     private Album openAlbum;         // null = root (albums), else its tracks
     private final Handler handler = new Handler();
     private final Runnable uiTick = new Runnable() {
@@ -347,12 +351,20 @@ public class MainActivity extends Activity {
 
         String saved = prefs.getString(KEY_TREE, null);
         if (saved != null) {
+            Uri u = Uri.parse(saved);
+            /* the tree is CONFIGURATION; the grant is a separate thing the system
+             * can revoke on its own (volume remount, provider restart). So keep
+             * the tree either way and REMEMBER a failure: the old code assigned
+             * treeUri inside the try and swallowed the exception, so a revoked
+             * grant became "0 albums · 0 tracks" with nothing logged anywhere,
+             * which is indistinguishable from an empty library. */
+            treeUri = u;
             try {
-                Uri u = Uri.parse(saved);
                 getContentResolver().takePersistableUriPermission(
                         u, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                treeUri = u;
-            } catch (SecurityException ignored) {
+            } catch (SecurityException e) {
+                treeGrantLost = true;
+                android.util.Log.w("marimo", "no access to saved tree " + u, e);
             }
         }
 
@@ -1069,7 +1081,7 @@ public class MainActivity extends Activity {
                 (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
         c.setConnectTimeout(6000);
         c.setReadTimeout(10000);
-        c.setRequestProperty("User-Agent", "marimo-android/1.2.7");
+        c.setRequestProperty("User-Agent", "marimo-android/1.2.11");
         int code = c.getResponseCode();
         if (code != 200) { c.disconnect(); return null; }
         try (java.io.InputStream is = c.getInputStream()) {
@@ -1189,6 +1201,12 @@ public class MainActivity extends Activity {
         for (Album have : albums)
             if (have.folder.equals(a.folder)) return;   /* dedupe by folder */
         albums.add(a);
+    }
+
+    /** true when the music folder can't be read: never picked, or the system
+     *  took the grant away (see onCreate). */
+    private boolean noAccess() {
+        return treeUri == null || treeGrantLost;
     }
 
     private void rescan() {
@@ -1330,8 +1348,9 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 buildEntries();
                 adapter.notifyDataSetChanged();
-                status.setText(albums.size() + " albums · "
-                        + totalTracks() + " tracks");
+                status.setText(noAccess()
+                        ? "no access to your music folder — use ⚙ pick folder"
+                        : albums.size() + " albums · " + totalTracks() + " tracks");
             });
         }).start();
     }
@@ -1419,9 +1438,11 @@ public class MainActivity extends Activity {
             Album a = new Album(f.getName());
             a.albumDoc = f;
             boolean folderCover = false;
+            DocumentFile waves = null;
             for (DocumentFile t : f.listFiles()) {
                 String n = t.getName();
                 if (n != null && isFolderCoverName(n)) folderCover = true;
+                if (WAVES_NAME.equals(n)) waves = t;
                 if (t.isFile() && isAudio(n)) {
                     Track tr = new Track(t.getUri().toString(), n);
                     pdirs.put(tr, f);
@@ -1429,6 +1450,8 @@ public class MainActivity extends Activity {
                 }
             }
             folderCoverCache.put(f.getUri().toString(), folderCover);
+            /* precomputed peaks, if this album has them — skips the decode */
+            if (waves != null) applyWaveSidecar(waves, a.tracks);
             if (!a.tracks.isEmpty()) per.add(a);
         } else if (f.isFile() && isAudio(f.getName())) {
             Album loose = new Album("(loose files)");
@@ -1438,6 +1461,47 @@ public class MainActivity extends Activity {
             per.add(loose);
         }
     }
+
+    /** Sidecar written by scripts/make-waveforms.py on the workstation, one per
+     *  album, alongside cover.jpg. Precomputed so the phone never decodes: a
+     *  decode here costs ~19s a track (the codec runs in another process and
+     *  charges ~300us per buffer hand-off, ~7850 per track).
+     *
+     *  Reading it is best-effort by design: missing, empty or malformed is not
+     *  an error, the track just falls back to decoding exactly as before. The
+     *  byte layout lives in WaveSidecar, which is unit-tested against a real
+     *  generated file. */
+    private void applyWaveSidecar(DocumentFile sidecar, List<Track> tracks) {
+        try {
+            byte[] blob;
+            try (java.io.InputStream in = getContentResolver()
+                    .openInputStream(sidecar.getUri())) {
+                if (in == null) return;
+                java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[8192];
+                int r;
+                while ((r = in.read(buf)) > 0) bos.write(buf, 0, r);
+                blob = bos.toByteArray();
+            }
+            java.util.Map<String, int[]> byName = WaveSidecar.parse(blob);
+            if (byName.isEmpty()) return;
+            int hit = 0;
+            for (Track t : tracks) {
+                int[] peaks = WaveSidecar.peaksFor(byName, t.name);
+                if (peaks != null) {
+                    WaveformExtractor.putPrecomputed(this, t.token, peaks);
+                    hit++;
+                }
+            }
+            android.util.Log.i("marimo", "waves sidecar: " + hit + "/" + tracks.size()
+                    + " precomputed");
+        } catch (Exception e) {
+            android.util.Log.e("marimo", "waves sidecar unreadable", e);
+        }
+    }
+
+    /** the per-album sidecar name (see applyWaveSidecar) */
+    private static final String WAVES_NAME = "waves.marimo";
 
     private void readTags(Track t, DocumentFile albumDir) {
         try {

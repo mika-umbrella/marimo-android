@@ -293,7 +293,7 @@ public class Scrobbler {
         c.setConnectTimeout(6000);
         c.setReadTimeout(12000);
         c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-        c.setRequestProperty("User-Agent", "marimo-android/1.2.7");
+        c.setRequestProperty("User-Agent", "marimo-android/1.2.11");
         try (OutputStream os = c.getOutputStream()) {
             os.write(formBody.getBytes(StandardCharsets.UTF_8));
         }
@@ -317,7 +317,7 @@ public class Scrobbler {
             c.setConnectTimeout(6000);
             c.setReadTimeout(12000);
             c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-            c.setRequestProperty("User-Agent", "marimo-android/1.2.7");
+            c.setRequestProperty("User-Agent", "marimo-android/1.2.11");
             try (OutputStream os = c.getOutputStream()) {
                 os.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }
@@ -355,7 +355,7 @@ public class Scrobbler {
             c.setReadTimeout(12000);
             c.setRequestProperty("Content-Type", "application/json");
             c.setRequestProperty("Authorization", "Token " + lbToken);
-            c.setRequestProperty("User-Agent", "marimo-android/1.2.7");
+            c.setRequestProperty("User-Agent", "marimo-android/1.2.11");
             try (OutputStream os = c.getOutputStream()) {
                 os.write(json.getBytes(StandardCharsets.UTF_8));
             }

@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Entry point for the marimo sync window (see marimosync/gui.py).
+
+Any arguments are passed through to the CLI, so you can aim the window at a test
+device:  marimo-sync-gui --device dir:/somewhere
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from marimosync.gui import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

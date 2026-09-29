@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# the tool writes these at runtime, into the cache dir and the scratch you configure
+*.log
+inventory.json

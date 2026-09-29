@@ -135,6 +135,22 @@ def album_dirs(roots):
                 yield dirpath, sorted(filenames)
 
 
+def album_as_one(root):
+    """Every audio file at or below `root`, as (basename, full_path).
+
+    Basenames because that's what the library and the phone match on
+    (`Library.sidecar_gaps` compares `Path(r).name`, and the app looks up by
+    filename), and one sidecar per album because that's where they look for it.
+    """
+    entries = []
+    for dirpath, dirnames, filenames in os.walk(os.path.abspath(root)):
+        dirnames.sort()
+        for f in sorted(filenames):
+            if os.path.splitext(f)[1].lower() in AUDIO_EXT:
+                entries.append((f, os.path.join(dirpath, f)))
+    return entries
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("roots", nargs="+")
@@ -143,6 +159,11 @@ def main():
     ap.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 4))
     ap.add_argument("--redraw", action="store_true",
                     help="recompute even where a sidecar already has an entry")
+    ap.add_argument("--per-album", action="store_true",
+                    help="treat each given root as ONE album -- subfolders included, "
+                         "sidecar written at the root. Use for album folders: a disc "
+                         "album keeps its tracks one level down, and shading each disc "
+                         "separately writes sidecars nothing reads")
     args = ap.parse_args()
 
     roots = [os.path.abspath(r) for r in args.roots]
@@ -150,20 +171,40 @@ def main():
 
     # plan first so the progress line is honest
     plan = []           # (album_dir, sidecar_path, [(name, full_path)])
-    for adir, files in album_dirs(roots):
-        rel = os.path.relpath(adir, base)
-        out = (os.path.join(args.outdir, rel, SIDECAR) if args.outdir
-               else os.path.join(adir, SIDECAR))
-        have = {} if args.redraw else read_sidecar(out)
-        audio = [f for f in files if os.path.splitext(f)[1].lower() in AUDIO_EXT]
-        todo = [f for f in audio if nfc(f) not in have]
-        if todo:
-            plan.append((out, have, [(f, os.path.join(adir, f)) for f in todo]))
+    albums_seen = 0     # albums that have audio at all, whether or not they need work
+    if args.per_album:
+        for root in roots:
+            entries = album_as_one(root)
+            if not entries:
+                continue
+            albums_seen += 1
+            out = (os.path.join(args.outdir, os.path.basename(root), SIDECAR)
+                   if args.outdir else os.path.join(root, SIDECAR))
+            have = {} if args.redraw else read_sidecar(out)
+            todo = [(f, p) for f, p in entries if nfc(f) not in have]
+            if todo:
+                plan.append((out, have, todo))
+    else:
+        for adir, files in album_dirs(roots):
+            audio = [f for f in files if os.path.splitext(f)[1].lower() in AUDIO_EXT]
+            if not audio:
+                continue
+            albums_seen += 1
+            rel = os.path.relpath(adir, base)
+            out = (os.path.join(args.outdir, rel, SIDECAR) if args.outdir
+                   else os.path.join(adir, SIDECAR))
+            have = {} if args.redraw else read_sidecar(out)
+            todo = [f for f in audio if nfc(f) not in have]
+            if todo:
+                plan.append((out, have, [(f, os.path.join(adir, f)) for f in todo]))
 
     total = sum(len(t) for _, _, t in plan)
     print(f"{len(roots)} root(s), {len(plan)} album(s) to update, "
           f"{total} track(s) to compute, {args.jobs} jobs", flush=True)
     if not total:
+        # Nothing to do is the *healthy* case once everything is shaded -- and this is
+        # where it used to crash on an undefined name, which the server faithfully
+        # reported as "waveforms exited 1" while the library was in fact complete.
         if albums_seen:
             print("everything already has a sidecar")
         else:

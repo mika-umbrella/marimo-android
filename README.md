@@ -48,6 +48,10 @@ without a sidecar just decode as before. Re-run it after adding or renaming an a
 by filename, so a rename invalidates one. Then run **Settings → rescan** once on the phone (the app
 restores from its cache on launch and only reads sidecars during a scan).
 
+**Or let [`tools/marimo-sync`](tools/marimo-sync) do the whole job** — the desktop companion converts a
+library from its originals, generates these sidecars, and serves the lot to a phone over wifi (or over adb
+when one is plugged in).
+
 Format, if you would rather generate it yourself:
 
 ```

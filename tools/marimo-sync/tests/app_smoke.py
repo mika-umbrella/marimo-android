@@ -131,6 +131,11 @@ def main() -> int:
         "convert_script": str(SCRATCH / "stub-convert.py"),
         "wave_script": str(SCRATCH / "stub-wave.py"),
         "scratch": str(SCRATCH),
+        # The Diary panel reads a diary; unset, that would be Nova's own
+        # ~/.config/marimo. Named as a fixture where the config is written.
+        "diary": str(SCRATCH / "diary"),
+        "diary_in": str(SCRATCH / "diary-in"),
+        "diary_out": str(SCRATCH / "diary-out"),
         "serve": {"port": PORT, "token": TOKEN, "auto": True,
                   "state": str(SCRATCH / "inventory.json")},
     }))
@@ -225,6 +230,26 @@ def main() -> int:
         check("and the window itself still resolves no transport",
               transports.autodetect_device is forbidden
               and transports.open_device is forbidden, "")
+
+        # The ⋯ menu's Diary… panel -- the window Nova actually opens. It reads both
+        # diaries off the disk, and with open_device still stubbed to raise, reaching it
+        # at all is proof that this path resolves no device either.
+        from marimosync.diary_panel import DiaryDialog
+
+        texts = [a.text() for a in w.btn_more.menu().actions()]
+        check("the ⋯ menu offers the diary", any("Diary…" in t for t in texts), str(texts))
+        (SCRATCH / "diary").mkdir(parents=True, exist_ok=True)
+        (SCRATCH / "diary" / "history.jsonl").write_bytes(
+            b'{"ts":1,"artist":"A","album":"B","title":"one","sec":1,"dur":0}\n')
+        (SCRATCH / "diary-last-merge.json").write_text(json.dumps(
+            {"at": "2026-09-29T14:00:00+01:00", "posted_lines": 47, "added": 157,
+             "duplicates": 47, "lines_after": 204, "sha256": "b" * 64, "size": 25820}))
+        # No exec() patching needed: the panel fills itself when it is constructed.
+        panel = DiaryDialog(w, CONFIG)
+        text = panel.body.text()
+        check("and the panel shows both sides off the disk, with no device",
+              "1 lines" in text and "posted 47 lines" in text and "added 157" in text
+              and "bbbbbbbbbbbbbbbb" in text, text[:300])
         check("the device flag is placed before the subcommand",
               appmod.device_argv([], ["status"], "adb:X", json_out=True)
               == ["--plain", "--json", "--device", "adb:X", "status"],

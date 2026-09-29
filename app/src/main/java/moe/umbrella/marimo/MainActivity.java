@@ -291,6 +291,8 @@ public class MainActivity extends Activity {
         findViewById(R.id.btn_sync_back).setOnClickListener(v -> showTab(3));
         findViewById(R.id.sync_check).setOnClickListener(v -> syncCheck());
         findViewById(R.id.sync_fetch).setOnClickListener(v -> syncFetch());
+        findViewById(R.id.sync_diary).setOnClickListener(v -> syncDiary());
+        findViewById(R.id.sync_log_toggle).setOnClickListener(v -> toggleSyncLog());
         etSyncAddr.addTextChangedListener(new android.text.TextWatcher() {
             @Override public void afterTextChanged(android.text.Editable s) {
                 String known = tokenFor(s.toString());
@@ -483,11 +485,24 @@ public class MainActivity extends Activity {
         Ui.panelPress(findViewById(R.id.btn_sync_back));
         Ui.panelPress(findViewById(R.id.sync_check));
         Ui.panelPress(findViewById(R.id.sync_fetch));
+        /* the two new buttons sit on the same screen as the two above, so they get the
+         * same treatment the screen already uses -- panelPress and no explicit text
+         * colour, matching their neighbours rather than the settings rows */
+        Ui.panelPress(findViewById(R.id.sync_diary));
+        Ui.panelPress(findViewById(R.id.sync_log_toggle));
         if (syncProgress != null) {
             syncProgress.setProgressTintList(
                     android.content.res.ColorStateList.valueOf(Theme.acc()));
             syncProgress.setProgressBackgroundTintList(
                     android.content.res.ColorStateList.valueOf(Theme.divider()));
+        }
+        /* The log's toggle says what it will do next, derived from the log itself, so a
+         * theme repaint (this method runs on every one) cannot leave it claiming
+         * "show log" over a log that is already open. */
+        android.widget.Button logToggle = findViewById(R.id.sync_log_toggle);
+        if (logToggle != null && syncLog != null) {
+            logToggle.setText(SyncClient.logToggleLabel(
+                    syncLog.getVisibility() == android.view.View.VISIBLE));
         }
         Ui.text(findViewById(R.id.btn_clear_queue), 1);
         Ui.panelPress(findViewById(R.id.btn_scrobble_back));
@@ -855,7 +870,11 @@ public class MainActivity extends Activity {
         ui.post(() -> syncLog.setText(syncLog.getText() + line + "\n"));
     }
 
-    /** Shared by both buttons: `fetch` false just asks what's missing. */
+    /** The library legs: `fetch` false just asks what's missing.
+     *
+     *  The diary is NOT part of these any more. It used to ride inside fetch, which
+     *  meant waiting for a whole folder of albums to sync a 5 kB listen log; each
+     *  press now does one thing, and reports its own line. */
     private void startSync(boolean fetch) {
         final String base = syncBase();
         if (base == null) {
@@ -870,8 +889,7 @@ public class MainActivity extends Activity {
         final String token = etSyncToken.getText().toString().trim();
         prefs.edit().putString(KEY_SYNC_ADDR, base).putString(KEY_SYNC_TOKEN, token).apply();
 
-        findViewById(R.id.sync_check).setEnabled(false);
-        syncFetch.setEnabled(false);
+        setSyncButtons(false);
         syncLog.setText("");
         syncProgress.setProgress(0);
         syncStatus.setText(fetch ? "fetching…" : "asking the desktop…");
@@ -908,10 +926,7 @@ public class MainActivity extends Activity {
                 final String msg = e.getMessage() == null ? e.toString() : e.getMessage();
                 ui.post(() -> syncStatus.setText("couldn't reach it: " + msg));
             } finally {
-                ui.post(() -> {
-                    findViewById(R.id.sync_check).setEnabled(true);
-                    syncFetch.setEnabled(true);
-                });
+                ui.post(() -> setSyncButtons(true));
             }
         }).start();
     }
@@ -922,6 +937,60 @@ public class MainActivity extends Activity {
 
     private void syncFetch() {
         startSync(true);
+    }
+
+    /** The diary on its own: send this phone's diary, import the union back.
+     *
+     *  It shares the address guard, the saved token and the log with the library legs,
+     *  because it is the same connection and the same screen — but not their work: it
+     *  is one small POST, and it touches the listening diary rather than the library.
+     *  The merge itself is still {@link DiaryImport#merge}, so the lock, the backups,
+     *  the atomic rename and the refusals are unchanged. */
+    private void syncDiary() {
+        final String base = syncBase();
+        if (base == null) {
+            syncStatus.setText("that doesn't look like an address on your own network — "
+                    + "use the computer's address, like 192.168.0.5");
+            return;
+        }
+        final String token = etSyncToken.getText().toString().trim();
+        prefs.edit().putString(KEY_SYNC_ADDR, base).putString(KEY_SYNC_TOKEN, token).apply();
+
+        setSyncButtons(false);
+        syncLog.setText("");
+        syncProgress.setProgress(0);
+        syncStatus.setText("fetching the diary…");
+
+        new Thread(() -> {
+            String line;
+            try {
+                line = DiarySync.run(this, base, token, this::syncLogLine);
+            } catch (Exception e) {
+                /* DiarySync is built not to throw; this is the belt to its braces, so a
+                 * surprise here cannot leave the buttons disabled forever */
+                line = "diary: " + (e.getMessage() == null ? e.toString() : e.getMessage());
+            }
+            final String report = line;
+            ui.post(() -> syncStatus.setText(report));
+            ui.post(() -> setSyncButtons(true));
+        }).start();
+    }
+
+    /** The three sync buttons move together: they share one address, one token and one
+     *  log area, so none of them should be tappable while another is running. */
+    private void setSyncButtons(boolean enabled) {
+        findViewById(R.id.sync_check).setEnabled(enabled);
+        syncFetch.setEnabled(enabled);
+        findViewById(R.id.sync_diary).setEnabled(enabled);
+    }
+
+    /** Logs are detail. Collapsed is the resting state; the status line above keeps
+     *  naming the file that is actually being fetched, so nothing important is hidden. */
+    private void toggleSyncLog() {
+        boolean open = syncLog.getVisibility() != android.view.View.VISIBLE;
+        syncLog.setVisibility(open ? android.view.View.VISIBLE : android.view.View.GONE);
+        android.widget.Button toggle = findViewById(R.id.sync_log_toggle);
+        if (toggle != null) toggle.setText(SyncClient.logToggleLabel(open));
     }
 
     /* ============================ recap screen ============================ */

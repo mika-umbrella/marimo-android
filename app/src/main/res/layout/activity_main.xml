@@ -203,7 +203,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="56dp"
                 android:layout_marginTop="10dp"
-                android:text="sync from desktop"
+                android:text="sync with desktop"
                 android:textSize="15sp"
                 android:gravity="start|center_vertical"
                 android:paddingStart="16dp" />
@@ -729,7 +729,7 @@ android:textSize="12sp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:layout_marginStart="12dp"
-                    android:text="sync from desktop"
+                    android:text="sync with desktop"
                     android:textSize="20sp"
                     android:textStyle="bold"
                     android:textColor="#7dff7d" />
@@ -794,6 +794,16 @@ android:textSize="12sp"
                         android:gravity="start|center_vertical"
                         android:paddingStart="16dp" />
 
+                    <Button
+                        android:id="@+id/sync_diary"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:layout_marginTop="10dp"
+                        android:text="fetch diary"
+                        android:textSize="15sp"
+                        android:gravity="start|center_vertical"
+                        android:paddingStart="16dp" />
+
                     <ProgressBar
                         android:id="@+id/sync_progress"
                         style="?android:attr/progressBarStyleHorizontal"
@@ -811,6 +821,16 @@ android:textSize="12sp"
                         android:textSize="13sp"
                         android:textColor="#e8ddd0" />
 
+                    <Button
+                        android:id="@+id/sync_log_toggle"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:layout_marginTop="12dp"
+                        android:text="show log"
+                        android:textSize="15sp"
+                        android:gravity="start|center_vertical"
+                        android:paddingStart="16dp" />
+
                     <TextView
                         android:id="@+id/sync_log"
                         android:layout_width="match_parent"
@@ -819,7 +839,8 @@ android:textSize="12sp"
                         android:paddingBottom="24dp"
                         android:textSize="11sp"
                         android:fontFamily="monospace"
-                        android:textColor="#7f8f7f" />
+                        android:textColor="#7f8f7f"
+                        android:visibility="gone" />
                 </LinearLayout>
             </ScrollView>
         </LinearLayout>

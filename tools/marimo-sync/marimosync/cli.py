@@ -48,7 +48,8 @@ def yn(colour: str, text: str, plain: bool) -> str:
 
 # every key a command-line flag can override
 FLAG_KEYS = ("source", "device", "root", "flac_source", "wave_script",
-             "convert_script", "adb", "hashcache", "scratch", "manifest")
+             "convert_script", "adb", "hashcache", "scratch", "manifest",
+             "diary", "diary_out", "diary_in", "diary_phone")
 
 
 def config_flags(args) -> dict:
@@ -463,6 +464,140 @@ def cmd_covers(args) -> int:
     return 0
 
 
+def _sha256(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _diary_shaped(name: str) -> bool:
+    """The two names the app itself enumerates -- nothing else travels."""
+    from .diary import CURRENT_NAME, archive_year
+
+    return name == CURRENT_NAME or archive_year(name) is not None
+
+
+def pull_diary(cfg: Config, device: Device) -> tuple[int, list[Path]]:
+    """Fetch the phone's exported diary into `diary_in`, byte-checked.
+
+    Byte-exactness is the point: what arrived is hashed and compared against the
+    digest the *device* computes for the same file, so "it came across" is a
+    measurement rather than a hope. Refuses when the phone has not exported anything
+    yet, because that silence is a missing human step and saying so beats merging
+    nothing and reporting success.
+    """
+    dest: Path = cfg.diary_in
+    listing = device.walk()
+    names = sorted(n for n in listing if n == Path(n).name and _diary_shaped(n))
+    if not names:
+        print(f"marimo-sync: diary: nothing exported yet in {device.root} -- press "
+              f"export on the phone first", file=sys.stderr)
+        return 2, []
+    print(f"pulling {files(len(names))} ({human(sum(listing[n] for n in names))}) from "
+          f"{device.label}  {device.root}  ->  {dest}")
+    pulled = device.pull(dest, names)
+    device_digests = device.hash_walk(names) or {}
+    mismatched = []
+    for name in pulled:
+        local = _sha256(dest / name)
+        want = device_digests.get(name)
+        state = ("verified" if want == local else
+                 "no digest from the device" if want is None else "MISMATCH")
+        print(f"  {name}  {listing.get(name, '?')} bytes  sha256 {local[:16]}  {state}")
+        if want is not None and want != local:
+            mismatched.append(name)
+    if mismatched:
+        raise DiaryError(f"{len(mismatched)} file(s) did not match the device's own "
+                         f"digest ({', '.join(mismatched)}) -- refusing to merge a copy "
+                         f"that is not the original")
+    return 0, [dest / n for n in pulled]
+
+
+def push_diary(out_dir: Path, device: Device) -> int:
+    """Copy the staged diary to the phone, where the app imports it from.
+
+    Only the names the app itself enumerates go across (`history.jsonl` and
+    `history.YYYY.jsonl.gz`), so our own `.bak-`/`.tmp-` leftovers next to them can
+    never be offered to it as diary files.
+    """
+    from .diary import diary_files
+
+    names = [p.name for p in diary_files(out_dir)]
+    if not names:
+        print(f"marimo-sync: diary: nothing staged in {out_dir} -- run "
+              f"`marimo-sync diary --import FILE --publish` first, or point --diary-out "
+              f"at where it was staged", file=sys.stderr)
+        return 2
+    print(f"pushing {files(len(names))} to {device.label}  {device.root}")
+    pushed = device.push(out_dir, names)
+    for name in names:
+        print(f"  {name}")
+    print(f"{files(pushed)} pushed -- the phone imports them from its Downloads folder")
+    return 0
+
+
+def cmd_diary(args) -> int:
+    """Fetch, merge, stage and/or send the diary -- on a cable.
+
+    Deliberately not resolve(): merging and staging touch no library and no device, which
+    is why they work with the phone unplugged. --pull and --push are the two that want a
+    device, and they ask for one *first*, so a phone that cannot be reached leaves the
+    diary and the staging folder exactly as they were. (The normal path is over wifi:
+    the app POSTs its diary to `serve`, and fetches the union back.)
+    """
+    from .diary import DiaryError, DiaryWriteError, merge, publish
+
+    cfg = Config.load(path=getattr(args, "config", None), flags=config_flags(args))
+    if not (args.sources or args.publish or args.push or args.pull):
+        print("marimo-sync: diary: nothing to do -- give --pull, --import FILE, "
+              "--publish or --push", file=sys.stderr)
+        return 2
+    device = None
+    if args.pull or args.push:
+        device = open_device(cfg["device"], cfg.diary_phone, inventory=cfg.inventory)
+    sources = [Path(p) for p in (args.sources or [])]
+    try:
+        if args.pull:
+            if args.dry_run:
+                listing = device.walk()
+                names = sorted(n for n in listing
+                               if n == Path(n).name and _diary_shaped(n))
+                print(f"{device.label}  {device.root} holds "
+                      + (f"{files(len(names))}: " + ", ".join(names) if names else
+                         "nothing -- press export on the phone first"))
+                print("--dry-run: nothing was fetched, so there is nothing to merge; "
+                      "run it again without --dry-run to pull and merge")
+                return 0
+            rc, pulled = pull_diary(cfg, device)
+            if rc:
+                return rc
+            if not sources:                    # --pull supplies the sources by itself
+                sources = pulled
+        if sources:
+            rc = merge(cfg.diary, sources, dry_run=args.dry_run,
+                       publish_to=cfg.diary_out if args.publish else None)
+            if rc:
+                return rc
+        elif args.publish:
+            publish(cfg.diary, None, cfg.diary_out, dry_run=args.dry_run)
+        if args.push:
+            return push_diary(cfg.diary_out, device)
+        return 0
+    except DiaryError as e:
+        print(f"marimo-sync: diary: {e}", file=sys.stderr)
+        print("nothing was written -- the diary is exactly as it was.", file=sys.stderr)
+        return 1
+    except DiaryWriteError as e:
+        print(f"marimo-sync: diary: {e}", file=sys.stderr)
+        print("the files already written are complete; re-run to finish the rest.",
+              file=sys.stderr)
+        return 1
+
+
 def cmd_app(args) -> int:
     """The server window. No device is resolved here, on purpose."""
     from .app import main as app_main
@@ -703,6 +838,33 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("convert", help="bring the compressed library up to date from ~/Music")
     p.add_argument("--dry-run", action="store_true", help="show what it would convert, do nothing")
     p.set_defaults(func=cmd_convert)
+
+    p = sub.add_parser("diary", help="merge a listening diary from the phone into the "
+                                     "desktop's history.jsonl, and give it back")
+    p.add_argument("--import", dest="sources", nargs="+", metavar="FILE",
+                   help="diary files to merge in: history.jsonl or history.YYYY.jsonl.gz "
+                        "(the app's export, or a copy of its diary)")
+    p.add_argument("--diary", metavar="DIR",
+                   help="the diary folder to merge into (default ~/.config/marimo)")
+    p.add_argument("--pull", action="store_true",
+                   help="fetch the phone's exported diary over the cable first; it is "
+                        "then merged, and becomes the import source unless you named "
+                        "--import files yourself (the normal path is wifi: the app POSTs "
+                        "to `serve`)")
+    p.add_argument("--diary-in", metavar="DIR",
+                   help="where --pull fetches the phone's export to")
+    p.add_argument("--publish", action="store_true",
+                   help="also stage the merged diary in the folder the phone imports "
+                        "from (diary_out) — no device needed")
+    p.add_argument("--push", action="store_true",
+                   help="copy the staged diary to the phone's Downloads — the only part "
+                        "of this command that wants a device")
+    p.add_argument("--diary-out", metavar="DIR",
+                   help="where to stage the merged diary (default: the tool's data dir)")
+    p.add_argument("--diary-phone", metavar="PATH",
+                   help="where on the phone it belongs (default /sdcard/Download/marimo)")
+    p.add_argument("--dry-run", action="store_true", help="print the plan, write nothing")
+    p.set_defaults(func=cmd_diary)
 
     args = ap.parse_args(argv)
     try:

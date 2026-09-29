@@ -94,17 +94,37 @@ DEFAULTS: dict[str, Any] = {
     "hashcache": None,
     # where push tars are built; null = the system temp dir
     "scratch": None,
+    # the desktop player's diary folder: history.jsonl and its gzipped years. Fixed
+    # at the player's own place -- marimo-desktop ignores XDG_CONFIG_HOME and reads
+    # ~/.config/marimo, so this default names that directory outright.
+    "diary": str(Path.home() / ".config" / "marimo"),
+    # where the merged diary is staged so the phone can import it. The phone cannot
+    # be written into (private filesDir, release build), so the exchange is a folder
+    # the desktop writes and the phone reads -- under our own data dir, because this
+    # one really is ours (unlike `diary`, it follows XDG_DATA_HOME).
+    "diary_out": str(data_dir() / "diary-out"),
+    # where `diary --pull` fetches the phone's export TO. Deliberately not the same
+    # folder as diary_out: the outbox is what gets published and pushed, so a fetched
+    # copy landing there would be overwritten by --publish (or pushed straight back).
+    "diary_in": str(data_dir() / "diary-in"),
+    # where on the phone that folder lands: the app imports the diary from its
+    # Downloads. Set this to where your app looks if it isn't that.
+    "diary_phone": "/sdcard/Download/marimo",
     # `serve` settings for the phone-pulls-over-the-LAN mode.
     #   auto  - the desktop app serves for as long as its window is open
     #   token - the shared secret the phone sends; generated and saved on first
     #           auto-serve, because a fresh token per launch would break the
     #           phone's saved one every time
-    "serve": {"port": 8422, "bind": None, "token": None, "auto": True},
+    #   diary - whether the phone may hand its listening diary over this link. On by
+    #           default, because that is the point of the feature -- but it is the one
+    #           endpoint that writes to the *player's* live diary, so it can be turned
+    #           off without turning the music off.
+    "serve": {"port": 8422, "bind": None, "token": None, "auto": True, "diary": True},
 }
 
 # keys whose value is a path and should have ~ expanded
 PATH_KEYS = {"source", "flac_source", "wave_script", "convert_script", "adb",
-             "hashcache", "scratch"}
+             "hashcache", "scratch", "diary", "diary_out", "diary_in"}
 
 # one line per key: shown by `marimo-sync config` and used as tooltips in the window
 HELP: dict[str, str] = {
@@ -118,7 +138,11 @@ HELP: dict[str, str] = {
     "manifest": "where the device-side manifest lives, relative to the device root",
     "hashcache": "where content hashes are cached locally",
     "scratch": "where push tars are built (defaults to the system temp dir)",
-    "serve": "settings for `serve`: {port, bind, token, auto}",
+    "diary": "the player's diary folder (history.jsonl + its gzipped years), for `diary`",
+    "diary_out": "where `diary --publish` stages the merged diary for the phone",
+    "diary_in": "where `diary --pull` fetches the phone's export to",
+    "diary_phone": "where the phone's app imports the diary from (its Downloads folder)",
+    "serve": "settings for `serve`: {port, bind, token, auto, diary}",
 }
 
 
@@ -203,6 +227,34 @@ class Config:
     @property
     def flac_source(self) -> Path | None:
         return self.path_value("flac_source")
+
+    @property
+    def diary(self) -> Path:
+        """The player's diary folder. Its default is spelled absolutely, so this is
+        the one place XDG does *not* get a say (the player ignores it)."""
+        return self.path_value("diary") or Path.home() / ".config" / "marimo"
+
+    @property
+    def diary_out(self) -> Path:
+        """Where the merged diary is staged for the phone to import."""
+        return self.path_value("diary_out") or data_dir() / "diary-out"
+
+    @property
+    def diary_in(self) -> Path:
+        """Where `diary --pull` fetches the phone's export to."""
+        return self.path_value("diary_in") or data_dir() / "diary-in"
+
+    @property
+    def diary_phone(self) -> str:
+        """Where on the device those staged files belong. A device path, not a local
+        one -- so no `~` expansion, and it is passed to the transport as the root."""
+        return self.values.get("diary_phone") or "/sdcard/Download/marimo"
+
+    @property
+    def diary_record(self) -> Path:
+        """Where the server notes what the last diary merge did, so the window can show
+        it without asking the server anything (it sits beside the phone's inventory)."""
+        return self.inventory.parent / "diary-last-merge.json"
 
     @property
     def wave_script(self) -> Path | None:

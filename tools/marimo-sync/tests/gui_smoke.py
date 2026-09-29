@@ -128,6 +128,11 @@ def main() -> int:
         "flac_source": str(HERE_FIXTURE_SRC),
         "convert_script": str(STUB_CONVERT),
         "wave_script": "none",
+        # The Diary panel reads a diary; unset, that would be Nova's own
+        # ~/.config/marimo. Named as a fixture here, in the code that writes it.
+        "diary": str(SCRATCH / "diary"),
+        "diary_in": str(SCRATCH / "diary-in"),
+        "diary_out": str(SCRATCH / "diary-out"),
         "serve": {"port": SERVE_PORT, "auto": True},
     }))
     check("the fixture starts with no token, so the window has to make one",
@@ -208,7 +213,38 @@ def main() -> int:
           w.log.toPlainText()[-220:])
     check("Prepare finishes", pump(app, lambda: w.proc is None, 60, "prepare to finish"))
 
-    print("\nwindow: the Settings panel round-trips\n")
+    print("\nwindow: the Diary panel reads both diaries, with no device anywhere")
+    real_dialog_exec = gui.QDialog.exec
+    gui.QDialog.exec = lambda self: gui.QDialog.DialogCode.Accepted     # don't block on it
+    panel = gui.DiaryDialog(w, CONFIG)
+    gui.QDialog.exec = real_dialog_exec
+    text = panel.body.text()
+    check("before anything exists, the panel says so rather than showing blanks",
+          "no diary yet" in text and "has not posted" in text, text[:240])
+
+    # Now the two files it reads: the diary itself, and the record the server writes
+    # when the phone posts. Paths are the fixture's own (config + XDG_CACHE_HOME).
+    (SCRATCH / "diary").mkdir(parents=True, exist_ok=True)
+    (SCRATCH / "diary" / "history.jsonl").write_bytes(
+        b'{"ts":1,"artist":"A","album":"B","title":"one","sec":1,"dur":0}\n'
+        b'{"ts":2,"artist":"A","album":"B","title":"two","sec":1,"dur":0}\n')
+    record = SCRATCH / "xdg-cache" / "marimo-sync" / "diary-last-merge.json"
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text(json.dumps({"at": "2026-09-29T14:00:00+01:00", "posted_lines": 47,
+                                  "added": 157, "duplicates": 47, "lines_after": 204,
+                                  "sha256": "a" * 64, "size": 25820}))
+    panel.fill()
+    text = panel.body.text()
+    check("with files to read it shows the desktop diary's lines",
+          "2 lines" in text, text[:240])
+    check("and the phone's last post and what the merge did",
+          "posted 47 lines" in text and "added 157" in text and "204 lines" in text,
+          text[:300])
+    check("and the merged file's digest and size",
+          "aaaaaaaaaaaaaaaa" in text and "25820" in text, text[:300])
+    check("the panel constructs no transport at all",
+          not any(hasattr(panel, attr) for attr in ("device", "proc", "transport")), "")
+
     real_dialog_exec = gui.QDialog.exec
     gui.QDialog.exec = lambda self: gui.QDialog.DialogCode.Accepted     # don't block on it
     w.open_settings()

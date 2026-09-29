@@ -23,6 +23,7 @@ can show the desktop's view of it without a cable.
 
 from __future__ import annotations
 
+import base64
 import datetime
 import hashlib
 import json
@@ -38,6 +39,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from .config import Config, cache_dir
 from .core import HashCache, Library
+from .diary import (DiaryError, DiaryWriteError, diary_summary, is_diary_file,
+                    merge_summary)
 from . import prep
 
 VERSION = 1
@@ -331,6 +334,9 @@ class Handler(BaseHTTPRequestHandler):
                                         "note": "no inventory reported yet"})
             return self._send(200, p.read_bytes(), "application/json; charset=utf-8")
 
+        if path == "/api/diary":
+            return self._diary_get()
+
         if path == "/api/album/" and parsed.path.endswith(".tar"):
             return self._error(404, "not found")
 
@@ -472,13 +478,131 @@ pointing it at <code>{url}</code>.</p>
         with self.state.lock:
             self.state.bytes_sent += length
 
+    # -------------------------------------------------------------- the diary
+    def _diary_record(self, record: dict) -> None:
+        """Note what the last merge did, where the window can read it off the disk."""
+        path = self.state.cfg.diary_record
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(record, indent=1, sort_keys=True))
+        os.replace(tmp, path)
+
+    def _diary_get(self) -> None:
+        """The merged diary's bytes, so the phone can import the union."""
+        path = self.state.cfg.diary / "history.jsonl"
+        if not path.is_file():
+            return self._error(404, f"no diary at {path} yet")
+        self._serve_path(path, path.stat().st_size,
+                         "application/x-ndjson; charset=utf-8",
+                         extra={"X-Marimo-Diary": "history.jsonl"})
+
+    def _diary_files(self) -> list[tuple[str, bytes]]:
+        """The merged diary's own bytes, under the two names the app accepts."""
+        diary = self.state.cfg.diary
+        if not diary.is_dir():
+            return []
+        return [(p.name, p.read_bytes()) for p in sorted(diary.iterdir())
+                if p.is_file() and is_diary_file(p.name)]
+
+    def _diary_post(self, data: dict) -> None:
+        """The phone hands its diary over; merge it and hand the union straight back.
+
+        The wire shape is the app's (agreed 2026-09-29):
+            {"version":1, "files":[{"name","size","b64"}]} in,
+            the merged bytes out the same way -- so what the phone imports is byte for
+            byte what this desktop holds, archives included. An empty `files` list is a
+            fresh phone saying "nothing from me" rather than a bad request: it still
+            wants the merged diary back.
+
+        This is the one endpoint that writes to the *player's* live diary, so it is
+        switchable off (`serve.diary`), it merges with the same code the CLI uses rather
+        than a second copy of the rule, and a diary the merge refuses comes back as an
+        error status with the reason -- never a 200 that quietly changed nothing.
+        """
+        cfg = self.state.cfg
+        if cfg.serve.get("diary", True) is False:
+            # 409 rather than 403 on purpose: the app reads 401/403 as "the token does
+            # not match", and this is not a token problem -- it is this desktop saying
+            # no, in a way that reaches the phone's log as HTTP 409.
+            return self._error(409, "the diary is switched off on this desktop "
+                                    "(serve.diary is false)")
+
+        posted = data.get("files", [])
+        if not isinstance(posted, list):
+            return self._error(400, 'expected {"files": [{"name", "size", "b64"}]}')
+
+        # Names the app would not accept are ignored rather than merged: one diary
+        # shape, everywhere.
+        ignored: list[str] = []
+        posted_lines = posted_bytes = 0
+        inbox = cfg.diary_in
+        inbox.mkdir(parents=True, exist_ok=True)
+        written: list[Path] = []
+        for entry in posted:
+            if not isinstance(entry, dict):
+                return self._error(400, "each file must be an object")
+            name = entry.get("name")
+            if not isinstance(name, str) or not is_diary_file(name):
+                ignored.append(str(name))
+                continue
+            try:
+                blob = base64.b64decode(entry.get("b64") or "", validate=True)
+            except Exception as e:
+                return self._error(400, f"{name}: not base64 ({e})")
+            path = inbox / name
+            path.write_bytes(blob)
+            written.append(path)
+            posted_lines += blob.count(b"\n")
+            posted_bytes += len(blob)
+
+        try:
+            if written:
+                summary = merge_summary(cfg.diary, written,
+                                        out=lambda line="": _say(line, flush=True))
+            else:
+                summary = diary_summary(cfg.diary)
+        except DiaryError as e:
+            return self._error(422, f"the merge refused it: {e}")
+        except DiaryWriteError as e:
+            return self._error(500, f"the merge failed after writing: {e}")
+
+        record = {
+            "at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "posted_lines": posted_lines,
+            "posted_bytes": posted_bytes,
+            "files": [n for n, _ in self._diary_files()],
+            "lines_before": summary.lines_before,
+            "lines_after": summary.lines_after,
+            "added": summary.added,
+            "duplicates": summary.duplicates,
+            "years": summary.years,
+            "sha256": summary.sha256,
+            "size": summary.size,
+        }
+        self._diary_record(record)
+        _say(f"  diary: merged {summary.added} line(s) from the phone "
+             f"({summary.lines_before} -> {summary.lines_after})", flush=True)
+        return self._json(200, {
+            "ok": True,
+            "before": summary.lines_before,
+            "after": summary.lines_after,
+            "added": summary.added,
+            "duplicates": summary.duplicates,
+            "digest": summary.sha256,
+            "files": [{"name": n, "size": len(b), "b64": base64.b64encode(b).decode()}
+                      for n, b in self._diary_files()],
+            "ignored": ignored,
+            "years": summary.years,
+            "at": record["at"],
+        })
+
     # ---------------------------------------------------------------- post
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
         if not self._authorised(query):
             return self._error(401, f"missing or wrong {TOKEN_HEADER}")
-        if parsed.path not in ("/api/manifest", "/api/prepare"):
+        if parsed.path not in ("/api/manifest", "/api/prepare", "/api/diary"):
             return self._error(404, "not found")
 
         length = int(self.headers.get("Content-Length") or 0)
@@ -491,6 +615,11 @@ pointing it at <code>{url}</code>.</p>
             return self._error(400, f"not JSON: {e}")
         if not isinstance(data, dict):
             return self._error(400, "expected a JSON object")
+
+        # The diary rides in as base64 inside JSON (a few kB; one round trip beats a
+        # second fetch), and the reply carries the merged bytes back the same way.
+        if parsed.path == "/api/diary":
+            return self._diary_post(data)
 
         # "convert these for me" -- what the phone sends when it wants an album the
         # library hasn't got yet. The work starts in the background and the caller

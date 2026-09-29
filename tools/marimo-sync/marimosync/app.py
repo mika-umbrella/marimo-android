@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow, QMe
                              QWidget)
 
 from .config import Config
+from .diary_panel import DiaryDialog
 from .serve import inventory_path, lan_address
 
 HERE = Path(__file__).resolve().parent
@@ -195,6 +196,7 @@ class ServeWindow(QMainWindow):
         menu.addAction("Refresh", lambda: (self.refresh(), self.refresh_device()))
         menu.addAction("Open the library folder", self.open_library)
         menu.addAction("Copy the token", self.copy_token)
+        menu.addAction("Diary…", self.open_diary)
         menu.addSeparator()
         menu.addAction("Push console… (cable, adb)", self.open_console)
         self.btn_more.setMenu(menu)
@@ -506,6 +508,16 @@ class ServeWindow(QMainWindow):
                 self.proc = None
             self.start()
             self.refresh()
+
+    def open_diary(self) -> None:
+        """The Diary panel: what each side holds, read off the disk.
+
+        Deliberately nothing else -- it constructs no transport and resolves no device,
+        which is the property this window is built around (and app_smoke asserts).
+        """
+        if self.cfg_path is None:
+            self.cfg_path = _cfg_path(self.argv)
+        DiaryDialog(self, self.cfg_path).exec()
 
     def open_console(self) -> None:
         """The old device-based window, deliberately, on purpose."""

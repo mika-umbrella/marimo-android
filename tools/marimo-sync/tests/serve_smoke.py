@@ -11,6 +11,7 @@ reads that report and gets the right answer.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -104,7 +105,13 @@ def main() -> int:
         "flac_source": str(SCRATCH / "no-such-source"),
         "convert_script": "none",
         "wave_script": "none",
-        "serve": {"state": str(SCRATCH / "inventory.json"), "prepare": False},
+        # The diary endpoints write to a *real* live diary if this is left unset --
+        # it would default to ~/.config/marimo, i.e. Nova's own listening history.
+        # Named as a fixture, explicitly, in the code that writes the config.
+        "diary": str(SCRATCH / "diary"),
+        "diary_in": str(SCRATCH / "diary-in"),
+        "diary_out": str(SCRATCH / "diary-out"),
+        "serve": {"state": str(SCRATCH / "inventory.json"), "prepare": False, "diary": True},
     }))
     cfg = Config.load(path=cfg_file)
 
@@ -426,6 +433,138 @@ def main() -> int:
     finally:
         httpd3.shutdown()
         httpd3.server_close()
+
+    print("\n11. the diary over the same link: POST it in, GET the union back")
+    # The config at the top names `diary`/`diary_in`/`diary_out` inside SCRATCH on
+    # purpose: this section writes a *diary*, and an unset `diary` would mean Nova's
+    # own listening history.
+    def dline(ts: int, artist: str, title: str, sec: int = 100) -> bytes:
+        return json.dumps({"ts": ts, "artist": artist, "album": "Serve", "title": title,
+                           "sec": sec, "dur": 1000}, ensure_ascii=False,
+                          separators=(",", ":")).encode()
+
+    def wire(name: str, blob: bytes) -> dict:
+        """One entry of the app's `files` array: base64, inline."""
+        return {"name": name, "size": len(blob), "b64": base64.b64encode(blob).decode()}
+
+    dfile = SCRATCH / "diary" / "history.jsonl"
+    dfile.parent.mkdir(parents=True, exist_ok=True)
+    now_ms = int(time.time() * 1000)
+    mine = dline(now_ms - 7200_000, "Desk", "ours")
+    theirs = dline(now_ms - 3600_000, "Phone", "theirs")
+    dfile.write_bytes(mine + b"\n")
+    before_diary = dfile.read_bytes()
+
+    httpd4 = serve(cfg, host="127.0.0.1", port=0, token=TOKEN, quiet=True)
+    base4 = f"http://127.0.0.1:{httpd4.server_address[1]}"
+    threading.Thread(target=httpd4.serve_forever, daemon=True).start()
+    try:
+        code, body = post(f"{base4}/api/diary",
+                          {"version": 1, "files": [wire("history.jsonl", theirs + b"\n")]},
+                          token=None)
+        check("posting a diary without a token is refused", code == 401, f"{code} {body[:80]}")
+
+        code, _, body = get(f"{base4}/api/diary")
+        check("the merged diary is fetchable and is this file's bytes",
+              code == 200 and body == before_diary, f"{code} {body[:80]}")
+
+        code, body = post(f"{base4}/api/diary",
+                          {"version": 1, "files": [wire("history.jsonl", b'{"ts":123,\n')]})
+        check("a diary the merge refuses comes back as an error, not a 200",
+              code == 422, f"{code} {body[:120]}")
+        check("and it changed nothing", dfile.read_bytes() == before_diary, "")
+
+        code, body = post(f"{base4}/api/diary",
+                          {"version": 1, "files": [wire("history.jsonl", theirs + b"\n")]})
+        reply = json.loads(body) if code == 200 else {}
+        check("a real diary is merged and the reply says what it did",
+              code == 200 and reply.get("ok") is True, f"{code} {body[:160]}")
+        check("the reply's numbers are the merge's own",
+              reply.get("before") == 1 and reply.get("after") == 2
+              and reply.get("added") == 1 and reply.get("duplicates") == 0,
+              json.dumps(reply)[:200])
+        check("the merged file really holds both lines, ts-ordered",
+              dfile.read_bytes() == mine + b"\n" + theirs + b"\n",
+              dfile.read_bytes()[:160].decode(errors="replace"))
+        check("the reply's digest is the merged file's",
+              reply.get("digest") == sha(dfile), f"{reply.get('digest')} vs {sha(dfile)}")
+
+        back = {f["name"]: f for f in reply.get("files", [])}
+        check("and it hands the merged bytes straight back, base64, byte for byte",
+              "history.jsonl" in back
+              and base64.b64decode(back["history.jsonl"]["b64"]) == dfile.read_bytes()
+              and back["history.jsonl"]["size"] == dfile.stat().st_size,
+              str(sorted(back)))
+        check("only diary names come back in `files`",
+              all(n == "history.jsonl"
+                  or (n.startswith("history.") and n.endswith(".jsonl.gz")) for n in back),
+              str(sorted(back)))
+
+        record = json.loads((SCRATCH / "diary-last-merge.json").read_text())
+        check("what the merge did is written where the window can read it",
+              record.get("added") == 1 and record.get("lines_after") == 2
+              and record.get("sha256") == sha(dfile) and record.get("posted_lines") == 1,
+              json.dumps(record)[:200])
+
+        code, _, body = get(f"{base4}/api/diary")
+        check("GET hands back the merged union", body == dfile.read_bytes(), body[:80])
+
+        code, body = post(f"{base4}/api/diary", {"version": 1, "files": []})
+        fresh = json.loads(body) if code == 200 else {}
+        check("an empty files list is 'nothing from me', not a bad request",
+              code == 200 and fresh.get("added") == 0, f"{code} {body[:160]}")
+        fresh_back = {f["name"]: f for f in fresh.get("files", [])}
+        check("and a fresh phone still gets the merged diary back",
+              base64.b64decode(fresh_back["history.jsonl"]["b64"]) == dfile.read_bytes(), "")
+
+        code, body = post(f"{base4}/api/diary",
+                          {"version": 1,
+                           "files": [wire("notes.txt", b"hello"),
+                                     wire("history.jsonl", theirs + b"\n")]})
+        mixed = json.loads(body) if code == 200 else {}
+        check("a name that is not a diary file is ignored, not merged",
+              code == 200 and mixed.get("ignored") == ["notes.txt"], json.dumps(mixed)[:160])
+
+        code, body = post(f"{base4}/api/diary",
+                          {"version": 1, "files": [wire("history.jsonl", theirs + b"\n")]})
+        second = json.loads(body) if code == 200 else {}
+        check("posting the same diary again adds nothing (the fixed point, over the wire)",
+              code == 200 and second.get("added") == 0, json.dumps(second)[:200])
+        check("and the file is byte-identical after the second post",
+              dfile.read_bytes() == mine + b"\n" + theirs + b"\n", "")
+
+        code, body = post(f"{base4}/api/nonesuch", {"files": []})
+        check("an endpoint this desktop hasn't got is a 404, so the app can read version skew",
+              code == 404, f"{code} {body[:80]}")
+    finally:
+        httpd4.shutdown()
+        httpd4.server_close()
+
+    off_cfg = SCRATCH / "config-off.json"
+    off_cfg.write_text(json.dumps({
+        "source": str(lib), "device": "http://127.0.0.1:0", "root": "/sdcard/Music",
+        "flac_source": str(SCRATCH / "no-such-source"), "convert_script": "none",
+        "wave_script": "none", "diary": str(SCRATCH / "diary"),
+        "diary_in": str(SCRATCH / "diary-in"), "diary_out": str(SCRATCH / "diary-out"),
+        "serve": {"state": str(SCRATCH / "inventory-off.json"), "diary": False},
+    }))
+    httpd5 = serve(Config.load(path=off_cfg), host="127.0.0.1", port=0, token=TOKEN,
+                   quiet=True)
+    base5 = f"http://127.0.0.1:{httpd5.server_address[1]}"
+    threading.Thread(target=httpd5.serve_forever, daemon=True).start()
+    try:
+        settled = dfile.read_bytes()
+        code, body = post(f"{base5}/api/diary",
+                          {"version": 1,
+                           "files": [wire("history.jsonl", dline(now_ms, "Off", "nope") + b"\n")]})
+        check("serve.diary = false refuses the POST, with a status that is not the app's "
+              "token message", code == 409, f"{code} {body[:120]}")
+        check("and it wrote nothing at all", dfile.read_bytes() == settled, "")
+        code, _, body = get(f"{base5}/api/diary")
+        check("while reading the diary stays allowed", code == 200 and body == settled, str(code))
+    finally:
+        httpd5.shutdown()
+        httpd5.server_close()
 
     print()
     if FAILED:

@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QDialog
                              QProgressBar, QPushButton, QTableWidget, QTableWidgetItem,
                              QVBoxLayout, QWidget)
 
+from .diary_panel import DiaryDialog
 from .serve import lan_address
 from .transports import gvfs_mtp_mounts, mount_mtp, mtp_volumes
 
@@ -369,14 +370,18 @@ class MainWindow(QMainWindow):
         self.btn_verify = QPushButton("Verify")
         self.btn_doctor = QPushButton("Doctor")
         self.btn_settings = QPushButton("Settings…")
+        self.btn_diary = QPushButton("Diary…")
+        self.btn_diary.setToolTip("what the two listening diaries hold, and what the "
+                                  "phone last sent — read off the disk, no device needed")
         self.btn_refresh.clicked.connect(lambda: self.refresh(log=True))
         self.btn_sync.clicked.connect(self.do_sync)
         self.btn_prepare.clicked.connect(self.do_prepare)
         self.btn_verify.clicked.connect(self.do_verify)
         self.btn_doctor.clicked.connect(self.do_doctor)
         self.btn_settings.clicked.connect(self.open_settings)
+        self.btn_diary.clicked.connect(self.open_diary)
         for b in (self.btn_refresh, self.btn_sync, self.btn_prepare, self.btn_verify,
-                  self.btn_doctor, self.btn_settings):
+                  self.btn_doctor, self.btn_settings, self.btn_diary):
             b.setMinimumWidth(88)
             ctl.addWidget(b)
 
@@ -774,6 +779,11 @@ class MainWindow(QMainWindow):
             self.auto_serve()
         else:
             self.stop_serve()
+
+    def open_diary(self) -> None:
+        """The Diary panel. Read-only, device-free, and useful before the phone has
+        ever reported: it says so rather than showing blanks."""
+        DiaryDialog(self, self.cfg_path).exec()
 
     def open_settings(self) -> None:
         overrides = overrides_in(self.argv)

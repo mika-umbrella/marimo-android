@@ -47,6 +47,11 @@ public class HistoryDiary {
     private static volatile String dir;
     private static final Object LOCK = new Object();
 
+    /** the monitor every read-modify-write of the diary files takes. DiaryImport
+     *  takes the same one, so a play logged by the playback service mid-merge
+     *  cannot be interleaved into a file the import is replacing. */
+    static Object lock() { return LOCK; }
+
     public static void configure(Context ctx) {
         setDir(ctx.getFilesDir().getAbsolutePath());
     }

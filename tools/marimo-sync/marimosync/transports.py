@@ -86,6 +86,15 @@ class Device:
         """Copy `rels` (relative to `libroot`) to the same relative path under root."""
         raise NotImplementedError
 
+    def pull(self, dest: Path, rels: Sequence[str]) -> list[str]:
+        """Copy these relative paths OFF the device into `dest`, byte for byte.
+
+        The mirror of `push`, and the only read here that promises the bytes are the
+        same ones: `read_text` decodes, which is fine for a manifest and useless for
+        a file whose digest has to match the device's.
+        """
+        raise NotImplementedError
+
     def remove(self, rels: Sequence[str]) -> None:
         """Delete these relative paths (files or whole directories)."""
         raise NotImplementedError
@@ -194,6 +203,22 @@ class DirDevice(Device):
             shutil.copy2(src, dst)
             n += 1
         return n
+
+    def pull(self, dest: Path, rels: Sequence[str]) -> list[str]:
+        """Copy these files' bytes into `dest` (a dir device is just a tree)."""
+        dest = Path(dest)
+        out: list[str] = []
+        for rel in rels:
+            src = self._p(rel)
+            if not src.is_file():
+                raise TransportError(f"{src} isn't there -- nothing to pull")
+            dst = dest / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            # bytes, not metadata: the fetched copy's mtime is when it was fetched,
+            # which keeps it honest about what it is
+            shutil.copyfile(src, dst)
+            out.append(rel)
+        return out
 
     def remove(self, rels: Sequence[str]) -> None:
         for rel in rels:
@@ -461,6 +486,11 @@ class AdbDevice(Device):
 
         SCRATCH.mkdir(parents=True, exist_ok=True)
         batches = _batch_by_size(rels, sizes, PUSH_BATCH_BYTES)
+        # The root may not exist yet (the diary's Downloads folder, say) and the
+        # extract below cds into it. DirDevice already makes the destination; this is
+        # the same promise for a phone, and it is a no-op when the root is there.
+        self._must(self.sh(f"mkdir -p {_q(self.root)}"),
+                   f"making {self.root} on the device")
         pushed = 0
         with tempfile.TemporaryDirectory(dir=SCRATCH, prefix="marimo-sync-") as tmp:
             local_tar = Path(tmp) / "batch.tar"
@@ -480,6 +510,20 @@ class AdbDevice(Device):
                 self._must(r, f"extracting batch {i}/{len(batches)}")
                 pushed += len(batch)
         return pushed
+
+    def pull(self, dest: Path, rels: Sequence[str]) -> list[str]:
+        """One `adb pull` per file: adb copies bytes, so a digest is comparable."""
+        dest = Path(dest)
+        out: list[str] = []
+        for rel in rels:
+            dst = dest / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            r = self._run(self._base() + ["pull", f"{self.root}/{rel}", str(dst)])
+            self._must(r, f"pulling {rel}")
+            if not dst.is_file():
+                raise TransportError(f"adb said it pulled {rel}, but nothing arrived")
+            out.append(rel)
+        return out
 
     def remove(self, rels: Sequence[str]) -> None:
         rels = list(rels)
@@ -722,6 +766,12 @@ class HttpDevice(Device):
 
     def remove(self, rels: Sequence[str]) -> None:
         raise TransportError("this device pulls -- the phone deletes its own files")
+
+    def pull(self, dest: Path, rels: Sequence[str]) -> list[str]:
+        raise TransportError(
+            "this device reports what it holds rather than handing files over. Have the "
+            "app POST its diary to `marimo-sync serve` (POST /api/diary), or fetch it "
+            "off the phone itself if it is on a cable.")
 
     def prune_empty_albums(self, albums: Sequence[str]) -> list[str]:
         return []

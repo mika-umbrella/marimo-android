@@ -90,7 +90,11 @@ public class MainActivity extends Activity {
     private AlbumAdapter adapter;
     private TextView status, folderName;
     private LinearLayout screenLibrary, screenPlayer, screenQueue, screenSettings, screenScrobble;
-    private LinearLayout screenRecap, recapBody;
+    private LinearLayout screenRecap, recapBody, screenSync;
+    private android.widget.EditText etSyncAddr, etSyncToken;
+    private TextView syncStatus, syncLog;
+    private android.widget.ProgressBar syncProgress;
+    private android.widget.Button syncFetch;
     private int recapMode = Recap.MODE_WEEK;
     private android.widget.EditText etLfKey, etLfSession, etLbToken;
     private TextView pTrack, pArtist, pAlbum, pTime;
@@ -196,6 +200,13 @@ public class MainActivity extends Activity {
         screenSettings = findViewById(R.id.screen_settings);
         screenScrobble = findViewById(R.id.screen_scrobble);
         screenRecap = findViewById(R.id.screen_recap);
+        screenSync = findViewById(R.id.screen_sync);
+        etSyncAddr = findViewById(R.id.sync_address);
+        etSyncToken = findViewById(R.id.sync_token);
+        syncStatus = findViewById(R.id.sync_status);
+        syncLog = findViewById(R.id.sync_log);
+        syncProgress = findViewById(R.id.sync_progress);
+        syncFetch = findViewById(R.id.sync_fetch);
         recapBody = findViewById(R.id.recap_body);
         etLfKey = findViewById(R.id.et_lf_key);
         etLfSession = findViewById(R.id.et_lf_session);
@@ -244,16 +255,12 @@ public class MainActivity extends Activity {
         });
         setupQueueGestures();
 
-        /* near-square screens (Titan 2 Elite 1080x1200) drop the A-Z strip so
-         * the list keeps its width. the player's cover stays: it only ever
-         * gets the leftover space (layout_weight 1), so it cannot squeeze the
-         * text/controls, and a short screen just shrinks it toward nothing. */
-        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
-        float ratio = (float) Math.min(dm.widthPixels, dm.heightPixels)
-                / Math.max(dm.widthPixels, dm.heightPixels);
-        if (ratio > 0.86f) {
-            findViewById(R.id.letterbar).setVisibility(View.GONE);
-        }
+        /* The A-Z strip is shown on every aspect ratio now. It used to be dropped on
+         * near-square screens (the Titan 2 Elite is 1080x1200, ratio 0.90) to give the
+         * list its full width -- but that was a guess made without the device in hand,
+         * and on the real one the strip reads fine. The player's cover still keeps its
+         * layout_weight 1, so it can only take leftover space and cannot squeeze the
+         * text or controls; a short screen just shrinks it toward nothing. */
 
         adapter = new AlbumAdapter(this, entries);
         ListView list = findViewById(R.id.tracklist);
@@ -280,6 +287,20 @@ public class MainActivity extends Activity {
         findViewById(R.id.set_rescan).setOnClickListener(v -> rescan());
         findViewById(R.id.set_scrobble).setOnClickListener(v -> showTab(4));
         findViewById(R.id.set_recap).setOnClickListener(v -> showTab(5));
+        findViewById(R.id.set_sync).setOnClickListener(v -> showTab(6));
+        findViewById(R.id.btn_sync_back).setOnClickListener(v -> showTab(3));
+        findViewById(R.id.sync_check).setOnClickListener(v -> syncCheck());
+        findViewById(R.id.sync_fetch).setOnClickListener(v -> syncFetch());
+        etSyncAddr.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void afterTextChanged(android.text.Editable s) {
+                String known = tokenFor(s.toString());
+                if (known != null && !known.contentEquals(etSyncToken.getText())) {
+                    etSyncToken.setText(known);
+                }
+            }
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
+        });
         findViewById(R.id.btn_recap_back).setOnClickListener(v -> showTab(3));
         findViewById(R.id.recap_week).setOnClickListener(v -> {
             recapMode = Recap.MODE_WEEK;
@@ -317,6 +338,13 @@ public class MainActivity extends Activity {
                                     .setSelection(i);
                     }
                 });
+
+        /* The strip reaching the screen edge is a layout matter now -- the row has a
+         * -12dp end margin and the strip is 12dp wider, which is exactly this screen's
+         * padding (see activity_main.xml). A TouchDelegate was the first attempt: it
+         * delivered the far-right tap to the strip but mapped it to the wrong letter,
+         * because the delegate's rect has to be expressed in the target's *parent*
+         * space. The layout does the same job with no coordinate maths. */
 
         /* player screen */
         findViewById(R.id.p_play).setOnClickListener(v ->
@@ -448,6 +476,19 @@ public class MainActivity extends Activity {
         Ui.tint(findViewById(R.id.btn_settings_back), 0);
         Ui.panelPress(findViewById(R.id.btn_settings_q));
         Ui.press(findViewById(R.id.btn_clear_queue));
+        /* The sync screen was added after this list, so its views kept Android's default
+         * look -- grey filled buttons and a cyan progress bar -- while everything around
+         * them is a flat card in the theme's colours. Same treatment as the rest. */
+        Ui.panelPress(findViewById(R.id.set_sync));
+        Ui.panelPress(findViewById(R.id.btn_sync_back));
+        Ui.panelPress(findViewById(R.id.sync_check));
+        Ui.panelPress(findViewById(R.id.sync_fetch));
+        if (syncProgress != null) {
+            syncProgress.setProgressTintList(
+                    android.content.res.ColorStateList.valueOf(Theme.acc()));
+            syncProgress.setProgressBackgroundTintList(
+                    android.content.res.ColorStateList.valueOf(Theme.divider()));
+        }
         Ui.text(findViewById(R.id.btn_clear_queue), 1);
         Ui.panelPress(findViewById(R.id.btn_scrobble_back));
         Ui.panelPress(findViewById(R.id.btn_scrobble_save));
@@ -750,9 +791,137 @@ public class MainActivity extends Activity {
         screenSettings.setVisibility(t == 3 ? View.VISIBLE : View.GONE);
         screenScrobble.setVisibility(t == 4 ? View.VISIBLE : View.GONE);
         screenRecap.setVisibility(t == 5 ? View.VISIBLE : View.GONE);
+        screenSync.setVisibility(t == 6 ? View.VISIBLE : View.GONE);
         if (t == 4) populateScrobble();
         if (t == 5) renderRecap();
+        if (t == 6) prepareSync();
         if (t == 2) refreshQueueList();
+    }
+
+    /* ============================ sync from desktop ============================ */
+
+    private static final String KEY_SYNC_ADDR = "sync_addr", KEY_SYNC_TOKEN = "sync_token";
+    private static final String KEY_SYNC_TOKENS = "sync_tokens";
+
+    /** Which token belongs to which desktop.
+     *
+     *  Every desktop makes its own random token, so pointing the phone at a second
+     *  computer used to mean retyping one. Remembering them by address is what
+     *  makes "I downloaded this on the other machine" work without any of that. */
+    private org.json.JSONObject knownTokens() {
+        try {
+            return new org.json.JSONObject(prefs.getString(KEY_SYNC_TOKENS, "{}"));
+        } catch (Exception e) {
+            return new org.json.JSONObject();
+        }
+    }
+
+    private void rememberToken(String base, String token) {
+        if (base == null || base.isEmpty() || token == null || token.isEmpty()) return;
+        try {
+            org.json.JSONObject all = knownTokens();
+            all.put(base, token);
+            prefs.edit().putString(KEY_SYNC_TOKENS, all.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** The token we already know for whatever has been typed, or null. */
+    private String tokenFor(String typed) {
+        String base = SyncClient.normalise(typed);
+        if (base.isEmpty()) return null;
+        String known = knownTokens().optString(base, null);
+        return known == null || known.isEmpty() ? null : known;
+    }
+
+    /** The address as typed, normalised and checked -- null if we won't use it.
+     *
+     *  The manifest allows cleartext for the whole app (a network-security-config
+     *  matches domains, not ranges), so this check is where "local only" lives. */
+    private String syncBase() {
+        String base = SyncClient.normalise(etSyncAddr.getText().toString());
+        return SyncClient.allowedAddress(base) ? base : null;
+    }
+
+    private void prepareSync() {
+        if (etSyncAddr.getText().length() == 0) etSyncAddr.setText(prefs.getString(KEY_SYNC_ADDR, ""));
+        if (etSyncToken.getText().length() == 0) {
+            String known = tokenFor(etSyncAddr.getText().toString());
+            etSyncToken.setText(known != null ? known : prefs.getString(KEY_SYNC_TOKEN, ""));
+        }
+    }
+
+    private void syncLogLine(String line) {
+        ui.post(() -> syncLog.setText(syncLog.getText() + line + "\n"));
+    }
+
+    /** Shared by both buttons: `fetch` false just asks what's missing. */
+    private void startSync(boolean fetch) {
+        final String base = syncBase();
+        if (base == null) {
+            syncStatus.setText("that doesn't look like an address on your own network — "
+                    + "use the computer's address, like 192.168.0.5");
+            return;
+        }
+        if (treeUri == null) {
+            syncStatus.setText("pick a music folder in settings first");
+            return;
+        }
+        final String token = etSyncToken.getText().toString().trim();
+        prefs.edit().putString(KEY_SYNC_ADDR, base).putString(KEY_SYNC_TOKEN, token).apply();
+
+        findViewById(R.id.sync_check).setEnabled(false);
+        syncFetch.setEnabled(false);
+        syncLog.setText("");
+        syncProgress.setProgress(0);
+        syncStatus.setText(fetch ? "fetching…" : "asking the desktop…");
+
+        final SyncEngine engine = new SyncEngine(this, treeUri, base, token);
+        final SyncEngine.Listener listener = new SyncEngine.Listener() {
+            @Override public void log(String line) {
+                syncLogLine(line);
+            }
+            @Override public void progress(int done, int total, String what) {
+                ui.post(() -> {
+                    syncProgress.setProgress(total > 0 ? done * 100 / total : 0);
+                    if (what != null && !what.isEmpty()) syncStatus.setText(what);
+                });
+            }
+        };
+
+        new Thread(() -> {
+            try {
+                if (fetch) {
+                    SyncEngine.Result r = engine.run(listener);
+                    rememberToken(base, token);
+                    ui.post(() -> syncStatus.setText(r.summary()));
+                    if (r.filesFetched > 0) ui.post(this::rescan);
+                } else {
+                    int[] r = engine.peek(listener);
+                    rememberToken(base, token);
+                    ui.post(() -> syncStatus.setText(
+                            r[0] + " album(s) missing, " + r[1] + " file(s)"
+                            + (r.length > 2 && r[2] == 1
+                               ? " · told the desktop what's here" : "")));
+                }
+            } catch (Exception e) {
+                final String msg = e.getMessage() == null ? e.toString() : e.getMessage();
+                ui.post(() -> syncStatus.setText("couldn't reach it: " + msg));
+            } finally {
+                ui.post(() -> {
+                    findViewById(R.id.sync_check).setEnabled(true);
+                    syncFetch.setEnabled(true);
+                });
+            }
+        }).start();
+    }
+
+    private void syncCheck() {
+        startSync(false);
+    }
+
+    private void syncFetch() {
+        startSync(true);
     }
 
     /* ============================ recap screen ============================ */

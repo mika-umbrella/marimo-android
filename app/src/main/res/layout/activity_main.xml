@@ -99,7 +99,13 @@
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:orientation="horizontal">
+                android:orientation="horizontal"
+                android:layout_marginEnd="-12dp"
+                android:clipToPadding="false">
+                <!-- The row reaches into the screen's 12dp padding, and the strip is
+                     widened by exactly that, so its right edge is the screen edge and it
+                     can be hit there. The list keeps its width (row + 12dp - 52dp is
+                     the same as row - 40dp), so nothing else on screen moves. -->
 
                 <ListView
                     android:id="@+id/tracklist"
@@ -111,7 +117,7 @@
 
                 <moe.umbrella.marimo.LetterBar
                     android:id="@+id/letterbar"
-                    android:layout_width="40dp"
+                    android:layout_width="52dp"
                     android:layout_height="match_parent" />
             </LinearLayout>
         </LinearLayout>
@@ -188,6 +194,16 @@
                 android:layout_height="56dp"
                 android:layout_marginTop="10dp"
                 android:text="dark theme: on"
+                android:textSize="15sp"
+                android:gravity="start|center_vertical"
+                android:paddingStart="16dp" />
+
+            <Button
+                android:id="@+id/set_sync"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="10dp"
+                android:text="sync from desktop"
                 android:textSize="15sp"
                 android:gravity="start|center_vertical"
                 android:paddingStart="16dp" />
@@ -683,6 +699,128 @@ android:textSize="12sp"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:paddingBottom="24dp" />
+            </ScrollView>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/screen_sync"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:padding="20dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <ImageButton
+                    android:id="@+id/btn_sync_back"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:src="@drawable/ic_back"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:contentDescription="back" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="12dp"
+                    android:text="sync from desktop"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="#7dff7d" />
+            </LinearLayout>
+
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:fillViewport="true">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="Run marimo-sync serve on the computer holding the library, then put its address here. Nothing is sent to this phone: it fetches over your own network."
+                        android:textSize="13sp"
+                        android:textColor="#9aa89a" />
+
+                    <EditText
+                        android:id="@+id/sync_address"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="18dp"
+                        android:hint="192.168.0.5"
+                        android:inputType="textUri"
+                        android:textSize="15sp"
+                        android:singleLine="true" />
+
+                    <EditText
+                        android:id="@+id/sync_token"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:hint="token (printed by marimo-sync serve)"
+                        android:inputType="text"
+                        android:textSize="15sp"
+                        android:singleLine="true" />
+
+                    <Button
+                        android:id="@+id/sync_check"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:layout_marginTop="18dp"
+                        android:text="check what's missing"
+                        android:textSize="15sp"
+                        android:gravity="start|center_vertical"
+                        android:paddingStart="16dp" />
+
+                    <Button
+                        android:id="@+id/sync_fetch"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:layout_marginTop="10dp"
+                        android:text="fetch"
+                        android:textSize="15sp"
+                        android:gravity="start|center_vertical"
+                        android:paddingStart="16dp" />
+
+                    <ProgressBar
+                        android:id="@+id/sync_progress"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:max="100"
+                        android:progress="0" />
+
+                    <TextView
+                        android:id="@+id/sync_status"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:textSize="13sp"
+                        android:textColor="#e8ddd0" />
+
+                    <TextView
+                        android:id="@+id/sync_log"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:paddingBottom="24dp"
+                        android:textSize="11sp"
+                        android:fontFamily="monospace"
+                        android:textColor="#7f8f7f" />
+                </LinearLayout>
             </ScrollView>
         </LinearLayout>
     </FrameLayout>

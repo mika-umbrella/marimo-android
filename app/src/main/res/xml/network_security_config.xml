@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  marimo's "sync from desktop" screen talks to a marimo-sync server over plain
+  HTTP on the local network.
+
+  Android refuses cleartext above targetSdk 28, and the permission can only be
+  granted app-wide here: a network-security-config matches *domains*, not address
+  ranges, and the desktop's address is whatever DHCP handed it, so "allow the LAN"
+  cannot be expressed in this file.
+
+  The narrowing that CAN be expressed lives in SyncClient.allowedAddress(), which
+  refuses any non-private target, so this permission buys nothing for a public host.
+  Everything else the app talks to (last.fm, ListenBrainz) is https and stays
+  https. If you change that guard, change this comment too.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

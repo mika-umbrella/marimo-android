@@ -94,7 +94,7 @@ public class RecapWorker extends Worker {
                 new NotificationCompat.Builder(ctx, CHANNEL)
                         .setSmallIcon(android.R.drawable.stat_notify_more)
                         .setContentTitle("barely listened this week")
-                        .setContentText("everything okay, angel? ♪")
+                        .setContentText("everything okay?")
                         .setContentIntent(pi)
                         .setAutoCancel(true);
         notify(ctx, b.build(), Recap.MODE_WEEK);
